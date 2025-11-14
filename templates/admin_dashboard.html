@@ -14,7 +14,7 @@
                 <span class="admin-badge">Admin Panel</span>
             </div>
             <div class="navbar-right">
-                <span class="welcome-text">Welcome, Admin</span>
+                <a href="{{ url_for('admin_job_description') }}" class="logout-btn">Job Description</a>
                 <a href="{{ url_for('admin_logout') }}" class="logout-btn">Logout</a>
             </div>
         </div>

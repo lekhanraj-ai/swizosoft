@@ -13,6 +13,10 @@ app.config.from_object(get_config())
 
 # Files uploaded path (change via env or config if needed)
 UPLOAD_FOLDER = app.config.get('UPLOAD_FOLDER', 'uploads')
+# Lightweight health endpoint so the server can be validated without DB access
+@app.route('/ping')
+def ping():
+    return 'pong', 200
 # Database connection helper
 def get_db():
     """Get database connection"""
@@ -53,9 +57,18 @@ def _resolve_table_name(base_name):
         pass
     return base_name
 
-# Cache resolved table names
-RESOLVED_FREE_TABLE = _resolve_table_name('free_internship')
-RESOLVED_PAID_TABLE = _resolve_table_name('paid_internship')
+# Lazy cache for resolved table names to avoid DB calls at import time
+_TABLE_NAME_CACHE = {}
+def get_resolved_table(base_name):
+    """Resolve and cache table name, but do it lazily to avoid DB calls on import."""
+    if base_name in _TABLE_NAME_CACHE:
+        return _TABLE_NAME_CACHE[base_name]
+    try:
+        resolved = _resolve_table_name(base_name)
+    except Exception:
+        resolved = base_name
+    _TABLE_NAME_CACHE[base_name] = resolved
+    return resolved
 
 # Simple login-required decorator
 def login_required(f):
@@ -112,7 +125,7 @@ def admin_get_internships():
     try:
         conn = get_db()
         cursor = conn.cursor()
-        table = RESOLVED_PAID_TABLE if internship_type == 'paid' else RESOLVED_FREE_TABLE
+        table = get_resolved_table('paid_internship') if internship_type == 'paid' else get_resolved_table('free_internship')
         # Free table has `project_document`, paid table does not. Use a safe select per type.
         if internship_type == 'paid':
             query = (
@@ -173,7 +186,7 @@ def admin_get_file(internship_id, file_type):
     try:
         conn = get_db()
         cursor = conn.cursor()
-        table = RESOLVED_PAID_TABLE if internship_type == 'paid' else RESOLVED_FREE_TABLE
+        table = get_resolved_table('paid_internship') if internship_type == 'paid' else get_resolved_table('free_internship')
         query = f"SELECT {column} FROM {table} WHERE id = %s"
         try:
             cursor.execute(query, (internship_id,))
@@ -218,6 +231,146 @@ def admin_serve_file(filename):
         return (f"File not found: {filename}", 404)
 
 
+@app.route('/admin/job-description', methods=['GET', 'POST'])
+@login_required
+def admin_job_description():
+    """Page to view/edit/delete/add the job description stored in the database.
+       The code will create a small table `job_description` if it does not exist and
+       store a single row with id=1.
+    """
+    # Work with DB but tolerate missing table or permissions. Provide user-friendly page.
+    conn = None
+    cursor = None
+    description = ''
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+
+        # Try to ensure table exists, but ignore errors (some hosts may not allow CREATE)
+        try:
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS job_description (
+                    id INT PRIMARY KEY,
+                    description TEXT
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )
+            conn.commit()
+        except Exception:
+            # Log but continue; we'll handle missing table below
+            print('Warning: could not create job_description table (may lack permissions)')
+
+        # Discover columns in the existing table (if any)
+        try:
+            cursor.execute("SELECT COLUMN_NAME FROM information_schema.columns WHERE table_schema=%s AND table_name=%s ORDER BY ORDINAL_POSITION", (app.config.get('MYSQL_DB'), 'job_description'))
+            cols = [r['COLUMN_NAME'] for r in cursor.fetchall()]
+        except Exception:
+            cols = []
+
+        # pick a sensible description column if present
+        desc_col = None
+        if cols:
+            for candidate in ('description', 'job_description', 'jd', 'text', 'desc'):
+                if candidate in cols:
+                    desc_col = candidate
+                    break
+            if not desc_col:
+                for c in cols:
+                    if c.lower() != 'id':
+                        desc_col = c
+                        break
+
+        if request.method == 'POST':
+            action = request.form.get('action')
+            desc = request.form.get('description', '').strip()
+            try:
+                if not cols:
+                    # Try to create default table if it didn't exist
+                    try:
+                        cursor.execute("CREATE TABLE IF NOT EXISTS job_description (id INT PRIMARY KEY, description TEXT) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4")
+                        conn.commit()
+                        desc_col = 'description'
+                        cols = ['id', 'description']
+                    except Exception:
+                        pass
+
+                if desc_col == 'description' and 'id' in [c.lower() for c in cols]:
+                    # id+description schema
+                    cursor.execute("SELECT id FROM job_description WHERE id = 1")
+                    if cursor.fetchone():
+                        if action in ('save', 'add'):
+                            cursor.execute("UPDATE job_description SET description = %s WHERE id = 1", (desc,))
+                        elif action == 'delete':
+                            cursor.execute("DELETE FROM job_description WHERE id = 1")
+                    else:
+                        if action in ('save', 'add'):
+                            cursor.execute("INSERT INTO job_description (id, description) VALUES (1, %s)", (desc,))
+                    conn.commit()
+                else:
+                    # single-column or unknown schema: update or insert into the detected column
+                    if not desc_col and cols:
+                        desc_col = cols[0]
+                    if desc_col:
+                        cursor.execute("SELECT COUNT(*) as cnt FROM job_description")
+                        cnt = cursor.fetchone().get('cnt', 0)
+                        if action == 'delete':
+                            cursor.execute("DELETE FROM job_description")
+                        elif cnt == 0:
+                            cursor.execute(f"INSERT INTO job_description ({desc_col}) VALUES (%s)", (desc,))
+                        else:
+                            cursor.execute(f"UPDATE job_description SET {desc_col} = %s", (desc,))
+                        conn.commit()
+            except Exception as e:
+                print('DB write error in admin_job_description:', e)
+            return redirect(url_for('admin_job_description'))
+
+        # GET: read the description using detected column
+        if cols and desc_col:
+            try:
+                cursor.execute(f"SELECT {desc_col} FROM job_description LIMIT 1")
+                row = cursor.fetchone()
+                if row and row.get(desc_col):
+                    description = row.get(desc_col)
+            except Exception:
+                pass
+
+    finally:
+        if cursor:
+            try:
+                cursor.close()
+            except Exception:
+                pass
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    return render_template('admin_job_description.html', description=description)
+
+
 if __name__ == '__main__':
-    app.secret_key = app.config.get('SECRET_KEY', 'change-me')
-    app.run(debug=True, host='0.0.0.0', port=5001)
+    # Ensure a secret key exists for session support
+    if not app.secret_key:
+        app.secret_key = app.config.get('SECRET_KEY') or 'dev-secret-change-me'
+    # Diagnostic prints to help debugging when the process exits immediately
+    try:
+        import sys, platform, os
+        print('Starting admin_app.py', file=sys.stderr)
+        print('Python executable:', sys.executable, file=sys.stderr)
+        print('Python version:', sys.version.replace('\n', ' '), file=sys.stderr)
+        print('CWD:', os.getcwd(), file=sys.stderr)
+        print('App debug:', app.debug, file=sys.stderr)
+        print('App secret set:', bool(app.secret_key), file=sys.stderr)
+    except Exception:
+        pass
+
+    # Show the URL and run the dev server without the reloader so the process
+    # you start is the one serving requests (avoids parent process exit visible
+    # to some shells when the reloader spawns a child).
+    try:
+        print('Server listening at http://127.0.0.1:5000', file=sys.stderr)
+    except Exception:
+        pass
+    app.run(host='127.0.0.1', port=5000, debug=app.debug, use_reloader=False)
