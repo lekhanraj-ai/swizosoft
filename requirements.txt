@@ -1,3 +1,14 @@
 Flask==2.3.3
 PyMySQL==1.1.2
 Werkzeug==2.3.7
+
+# Optional / recommended for deployment and features used in docs
+waitress==2.1.2
+Flask-Caching==2.0.1
+Flask-Compress==1.13
+Flask-WTF==1.1.1
+Flask-Limiter==2.9.0
+python-dotenv==1.0.0
+
+# Image support (if you need image processing)
+Pillow==10.0.0
