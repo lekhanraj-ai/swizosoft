@@ -561,14 +561,14 @@ body {
 
 /* ===== EDIT MODAL ===== */
 .edit-btn {
-    background: #0066cc;
+    background: #ff9800;
     color: white;
 }
 
 .edit-btn:hover {
-    background: #0052a3;
+    background: #e68900;
     transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(0, 102, 204, 0.3);
+    box-shadow: 0 4px 12px rgba(255, 152, 0, 0.3);
 }
 
 .edit-modal {

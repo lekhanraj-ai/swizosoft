@@ -1,88 +1,165 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Job Description - Admin</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='css/dashboard.css') }}"
+    />
     <style>
-        .jd-container { max-width: 900px; margin: 40px auto; background:#fff; padding:24px; border-radius:8px; box-shadow:0 6px 20px rgba(0,0,0,0.08); }
-        .jd-actions { display:flex; gap:10px; margin-top:12px; }
-        .jd-actions button { padding:10px 14px; border-radius:6px; cursor:pointer; }
-        textarea#description { width:100%; min-height:320px; padding:12px; font-size:15px; border-radius:6px; border:1px solid #ddd; }
+      .jd-container {
+        max-width: 900px;
+        margin: 40px auto;
+        background: #fff;
+        padding: 24px;
+        border-radius: 8px;
+        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
+        overflow: auto;
+      }
+      .jd-actions {
+        display: flex;
+        gap: 10px;
+        margin-top: 12px;
+      }
+      .jd-actions button {
+        padding: 10px 14px;
+        border-radius: 6px;
+        cursor: pointer;
+      }
+      textarea#description {
+        width: 100%;
+        min-height: 320px;
+        padding: 12px;
+        font-size: 15px;
+        border-radius: 6px;
+        border: 1px solid #ddd;
+        box-sizing: border-box;
+        resize: vertical;
+        overflow: auto;
+      }
     </style>
-</head>
-<body>
+  </head>
+  <body>
     <nav class="navbar">
-        <div class="navbar-container">
-            <div class="navbar-brand"><h2>SWIZOSOFT</h2><span class="admin-badge">Admin Panel</span></div>
-            <div class="navbar-right">
-                <a href="{{ url_for('admin_logout') }}" class="logout-btn">Logout</a>
-            </div>
+      <div class="navbar-container">
+        <div class="navbar-brand">
+          <h2>SWIZOSOFT</h2>
+          <span class="admin-badge">Admin Panel</span>
         </div>
+        <div class="navbar-right">
+          <a href="{{ url_for('admin_logout') }}" class="logout-btn">Logout</a>
+        </div>
+      </div>
     </nav>
 
     <div class="dashboard-container">
-        <div class="jd-container">
-            <h3>Job Description</h3>
+      <div class="jd-container">
+        <h3>Job Description</h3>
 
-            <div id="jd-view">
-                {% if description %}
-                    <div style="white-space:pre-wrap; border:1px solid #eee; padding:16px; border-radius:6px; background:#fafafa;">{{ description|e }}</div>
-                    <div style="margin-top:12px; display:flex; gap:10px;">
-                        <button class="file-btn" onclick="showEditor()">Edit</button>
-                        <button class="file-btn" onclick="confirmDelete()">Delete</button>
-                        <a href="{{ url_for('admin_dashboard') }}" class="file-btn">Back</a>
-                    </div>
-                {% else %}
-                    <div style="color:#666; padding:16px; border:1px dashed #ddd; border-radius:6px;">No job description set.</div>
-                    <div style="margin-top:12px; display:flex; gap:10px;">
-                        <button class="file-btn" onclick="showEditor()">Add Job Description</button>
-                        <a href="{{ url_for('admin_dashboard') }}" class="file-btn">Back</a>
-                    </div>
-                {% endif %}
-            </div>
-
-            <form id="jd-form" method="post" style="margin-top:16px; display:none;">
-                <input type="hidden" name="action" id="jd-action" value="save">
-                <textarea id="description" name="description" placeholder="Enter job description here...">{{ description|e }}</textarea>
-                <div class="jd-actions">
-                    <button type="button" class="file-btn" onclick="submitAction('save')">Save</button>
-                    <button type="button" class="file-btn" onclick="submitAction('add')">Add</button>
-                    <button type="button" class="file-btn" onclick="hideEditor()">Cancel</button>
-                </div>
-            </form>
-
+        <div id="jd-view">
+          {% if description %}
+          <div
+            style="
+              white-space: pre-wrap;
+              border: 1px solid #eee;
+              padding: 16px;
+              border-radius: 6px;
+              background: #fafafa;
+            "
+          >
+            {{ description|e }}
+          </div>
+          <div style="margin-top: 12px; display: flex; gap: 10px">
+            <button class="file-btn" onclick="showEditor()">Edit</button>
+            <button class="file-btn" onclick="confirmDelete()">Delete</button>
+            <a href="{{ url_for('admin_dashboard') }}" class="file-btn">Back</a>
+          </div>
+          {% else %}
+          <div
+            style="
+              color: #666;
+              padding: 16px;
+              border: 1px dashed #ddd;
+              border-radius: 6px;
+            "
+          >
+            No job description set.
+          </div>
+          <div style="margin-top: 12px; display: flex; gap: 10px">
+            <button class="file-btn" onclick="showEditor()">
+              Add Job Description
+            </button>
+            <a href="{{ url_for('admin_dashboard') }}" class="file-btn">Back</a>
+          </div>
+          {% endif %}
         </div>
+
+        <form
+          id="jd-form"
+          method="post"
+          style="margin-top: 16px; display: none"
+        >
+          <input type="hidden" name="action" id="jd-action" value="save" />
+          <textarea
+            id="description"
+            name="description"
+            placeholder="Enter job description here..."
+          >
+{{ description|e }}</textarea
+          >
+          <div class="jd-actions">
+            <button
+              type="button"
+              class="file-btn"
+              onclick="submitAction('save')"
+            >
+              Save
+            </button>
+            <button
+              type="button"
+              class="file-btn"
+              onclick="submitAction('add')"
+            >
+              Add
+            </button>
+            <button type="button" class="file-btn" onclick="hideEditor()">
+              Cancel
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
 
     <script>
-        function showEditor(){
-            document.getElementById('jd-view').style.display = 'none';
-            document.getElementById('jd-form').style.display = 'block';
+      function showEditor() {
+        document.getElementById("jd-view").style.display = "none";
+        document.getElementById("jd-form").style.display = "block";
+      }
+      function hideEditor() {
+        document.getElementById("jd-form").style.display = "none";
+        document.getElementById("jd-view").style.display = "block";
+      }
+      function submitAction(action) {
+        var form = document.getElementById("jd-form");
+        document.getElementById("jd-action").value = action;
+        form.submit();
+      }
+      function confirmDelete() {
+        if (confirm("Delete job description? This cannot be undone.")) {
+          // create a small form to submit delete
+          var f = document.createElement("form");
+          f.method = "post";
+          var a = document.createElement("input");
+          a.type = "hidden";
+          a.name = "action";
+          a.value = "delete";
+          f.appendChild(a);
+          document.body.appendChild(f);
+          f.submit();
         }
-        function hideEditor(){
-            document.getElementById('jd-form').style.display = 'none';
-            document.getElementById('jd-view').style.display = 'block';
-        }
-        function submitAction(action){
-            var form = document.getElementById('jd-form');
-            document.getElementById('jd-action').value = action;
-            form.submit();
-        }
-        function confirmDelete(){
-            if(confirm('Delete job description? This cannot be undone.')){
-                // create a small form to submit delete
-                var f = document.createElement('form');
-                f.method = 'post';
-                var a = document.createElement('input');
-                a.type = 'hidden'; a.name = 'action'; a.value = 'delete';
-                f.appendChild(a);
-                document.body.appendChild(f);
-                f.submit();
-            }
-        }
+      }
     </script>
-
-</body>
+  </body>
 </html>

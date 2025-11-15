@@ -112,7 +112,7 @@ function populateTable(type, data) {
             </div>
             
             <div class="action-buttons">
-                <button class="action-btn edit-btn" onclick="openEditModal(${row.id}, '${type}')">✎ Edit</button>
+                <button class="action-btn edit-btn" onclick="openEditModal(${row.id}, '${type}')">🖊️ Edit</button>
                 <button class="action-btn accept-btn" onclick="updateStatus(${row.id}, 'ACCEPTED', '${type}')">✓ Accept</button>
                 <button class="action-btn reject-btn" onclick="updateStatus(${row.id}, 'REJECTED', '${type}')">✕ Reject</button>
             </div>
@@ -337,6 +337,13 @@ function showEditModal(internshipId, internshipType, profileData) {
         "ELECTRICAL ENGINEERING"
     ];
     
+    const yearsList = [
+        "1st Year",
+        "2nd Year",
+        "3rd Year",
+        "4th Year"
+    ];
+    
     let formHTML = '';
     for (const [key, value] of Object.entries(profileData)) {
         if (!excludeColumns.includes(key.toLowerCase())) {
@@ -362,6 +369,17 @@ function showEditModal(internshipId, internshipType, profileData) {
                         <label for="field_${key}">${displayKey}</label>
                         <select id="field_${key}" class="form-input">
                             ${branchesList.map(branch => `<option value="${branch}" ${storedValue.toUpperCase() === branch.toUpperCase() ? 'selected' : ''}>${branch}</option>`).join('')}
+                        </select>
+                    </div>
+                `;
+            }
+            // Create dropdown for year fields
+            else if (key.toLowerCase().includes('year') || key.toLowerCase().includes('semester') || key.toLowerCase().includes('sem')) {
+                formHTML += `
+                    <div class="form-group">
+                        <label for="field_${key}">${displayKey}</label>
+                        <select id="field_${key}" class="form-input">
+                            ${yearsList.map(year => `<option value="${year}" ${storedValue === year ? 'selected' : ''}>${year}</option>`).join('')}
                         </select>
                     </div>
                 `;
