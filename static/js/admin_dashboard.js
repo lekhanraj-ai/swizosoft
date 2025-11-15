@@ -63,19 +63,55 @@ function populateTable(type, data) {
     const countElem = type === 'free' ? freeCount : paidCount;
     tableBody.innerHTML = '';
     if (!data || data.length === 0) {
-        tableBody.innerHTML = '<tr class="empty-row"><td colspan="5">No records found</td></tr>';
+        const colSpan = type === 'free' ? 6 : 6;
+        tableBody.innerHTML = `<tr class="empty-row"><td colspan="${colSpan}">No records found</td></tr>`;
         countElem.textContent = '0';
         return;
     }
     countElem.textContent = data.length;
     data.forEach(row => {
         const tr = document.createElement('tr');
+        let buttonsHtml = '';
+        
+        if (type === 'free') {
+            buttonsHtml = `
+                <td>
+                    <button class="file-btn" onclick="viewFile(${row.id}, 'id_proof', '${type}')">View ID Proof</button>
+                </td>
+                <td>
+                    <button class="file-btn" onclick="viewFile(${row.id}, 'resume', '${type}')">View Resume</button>
+                </td>
+                <td>
+                    <button class="file-btn" onclick="viewFile(${row.id}, 'project', '${type}')">View Project</button>
+                </td>
+                <td>
+                    <button class="action-btn accept-btn" onclick="updateStatus(${row.id}, 'ACCEPTED', '${type}')">Accept</button>
+                    <button class="action-btn reject-btn" onclick="updateStatus(${row.id}, 'REJECTED', '${type}')">Reject</button>
+                </td>
+            `;
+        } else {
+            // Paid internship - has payment screenshot instead of project
+            buttonsHtml = `
+                <td>
+                    <button class="file-btn" onclick="viewFile(${row.id}, 'id_proof', '${type}')">View ID Proof</button>
+                </td>
+                <td>
+                    <button class="file-btn" onclick="viewFile(${row.id}, 'resume', '${type}')">View Resume</button>
+                </td>
+                <td>
+                    <button class="file-btn" onclick="viewFile(${row.id}, 'payment', '${type}')">View Payment Screenshots</button>
+                </td>
+                <td>
+                    <button class="action-btn accept-btn" onclick="updateStatus(${row.id}, 'ACCEPTED', '${type}')">Accept</button>
+                    <button class="action-btn reject-btn" onclick="updateStatus(${row.id}, 'REJECTED', '${type}')">Reject</button>
+                </td>
+            `;
+        }
+        
         tr.innerHTML = `
             <td>${row.name || '-'}</td>
             <td>${row.usn || '-'}</td>
-            <td><button class="file-btn" onclick="viewFile(${row.id}, 'id_proof', '${type}')">View ID Proof</button></td>
-            <td><button class="file-btn" onclick="viewFile(${row.id}, 'resume', '${type}')">View Resume</button></td>
-            <td><button class="file-btn" onclick="viewFile(${row.id}, 'project', '${type}')">View Project</button></td>
+            ${buttonsHtml}
         `;
         tableBody.appendChild(tr);
     });
@@ -83,10 +119,60 @@ function populateTable(type, data) {
 
 function showError(type, message) {
     const tableBody = type === 'free' ? freeTableBody : paidTableBody;
-    tableBody.innerHTML = `<tr class="empty-row"><td colspan="5">${message}</td></tr>`;
+    const colSpan = type === 'free' ? 6 : 6;
+    tableBody.innerHTML = `<tr class="empty-row"><td colspan="${colSpan}">${message}</td></tr>`;
+}
+
+function updateStatus(internshipId, status, internshipType) {
+    if (!confirm(`Are you sure you want to mark this application as ${status}?`)) {
+        return;
+    }
+    
+    fetch(`/admin/api/update-status/${internshipId}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            status: status,
+            type: internshipType
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(`Application ${status.toLowerCase()}!`);
+            // Refresh the table
+            loadInternships(currentType);
+        } else {
+            alert('Error: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Error updating status');
+    });
 }
 
 function viewFile(internshipId, fileType, internshipType) {
+    // Special handling for payment screenshots
+    if (fileType === 'payment') {
+        fetch(`/admin/api/get-payment-screenshots/${internshipId}?type=${internshipType}`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    displayFileUrlInModal(data.inplace_url, data.file_name || '', 'payment');
+                } else {
+                    alert('Payment screenshot not found: ' + (data.error || 'unknown'));
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error loading payment screenshot');
+            });
+        return;
+    }
+    
     fetch(`/admin/api/get-file/${internshipId}/${fileType}?type=${internshipType}`)
         .then(response => response.json())
         .then(data => {

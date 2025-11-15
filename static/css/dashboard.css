@@ -264,6 +264,46 @@ body {
     transform: translateY(0);
 }
 
+/* Action Buttons (Accept/Reject) */
+.action-btn {
+    background: #6c757d;
+    color: white;
+    border: none;
+    padding: 8px 12px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    transition: all 0.3s ease;
+    margin: 3px;
+    white-space: nowrap;
+}
+
+.action-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 3px 8px rgba(0, 0, 0, 0.2);
+}
+
+.action-btn:active {
+    transform: translateY(0);
+}
+
+.accept-btn {
+    background: #28a745;
+}
+
+.accept-btn:hover {
+    background: #218838;
+}
+
+.reject-btn {
+    background: #dc3545;
+}
+
+.reject-btn:hover {
+    background: #c82333;
+}
+
 .loading-row td {
     text-align: center;
     color: #999;

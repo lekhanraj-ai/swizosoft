@@ -331,6 +331,213 @@ def admin_serve_file_inplace(internship_id, file_type):
         return (f"Error: {str(e)}", 500)
 
 
+@app.route('/admin/api/update-status/<int:internship_id>', methods=['POST'])
+@login_required
+def admin_update_status(internship_id):
+    """Update acceptance status (ACCEPTED/REJECTED) for an internship application.
+       POST params: status=ACCEPTED|REJECTED, type=free|paid
+    """
+    internship_type = request.json.get('type', 'free')
+    status = request.json.get('status', '').upper()
+    
+    if status not in ('ACCEPTED', 'REJECTED'):
+        return jsonify({'success': False, 'error': 'Invalid status'}), 400
+    
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+        table = get_resolved_table('paid_internship') if internship_type == 'paid' else get_resolved_table('free_internship')
+        
+        # Update the status column (if it exists)
+        try:
+            query = f"UPDATE {table} SET status = %s WHERE id = %s"
+            cursor.execute(query, (status, internship_id))
+            conn.commit()
+            cursor.close()
+            conn.close()
+            return jsonify({'success': True, 'message': f'Status updated to {status}'})
+        except Exception:
+            # Try alternate table name
+            alt_table = table + '_application' if not table.endswith('_application') else table.replace('_application', '')
+            query = f"UPDATE {alt_table} SET status = %s WHERE id = %s"
+            cursor.execute(query, (status, internship_id))
+            conn.commit()
+            cursor.close()
+            conn.close()
+            return jsonify({'success': True, 'message': f'Status updated to {status}'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/admin/api/get-payment-screenshots/<int:internship_id>')
+@login_required
+def admin_get_payment_screenshots(internship_id):
+    """Get payment screenshot file path from database (paid internship only).
+       Query param: type=free|paid
+       Returns: {file_name: "...", inplace_url: "..."}
+    """
+    internship_type = request.args.get('type', 'paid')
+    
+    if internship_type != 'paid':
+        return jsonify({'success': False, 'error': 'Payment screenshots only available for paid internships'}), 400
+    
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+        table = get_resolved_table('paid_internship')
+        
+        # Assume column is named 'payment_screenshot' or similar
+        query = f"SELECT payment_screenshot FROM {table} WHERE id = %s"
+        try:
+            cursor.execute(query, (internship_id,))
+            result = cursor.fetchone()
+        except Exception:
+            # Try alternate names or table
+            alt_table = table + '_application' if not table.endswith('_application') else table.replace('_application', '')
+            alt_query = f"SELECT payment_screenshot FROM {alt_table} WHERE id = %s"
+            try:
+                cursor.execute(alt_query, (internship_id,))
+                result = cursor.fetchone()
+            except Exception:
+                # Try 'payment_proof' instead
+                alt_query = f"SELECT payment_proof FROM {alt_table} WHERE id = %s"
+                cursor.execute(alt_query, (internship_id,))
+                result = cursor.fetchone()
+        
+        cursor.close()
+        conn.close()
+        
+        if not result or not result.get('payment_screenshot'):
+            # Try payment_proof column
+            conn = get_db()
+            cursor = conn.cursor()
+            try:
+                query = f"SELECT payment_proof FROM {table} WHERE id = %s"
+                cursor.execute(query, (internship_id,))
+                result = cursor.fetchone()
+            except Exception:
+                pass
+            cursor.close()
+            conn.close()
+            
+            if not result or not result.get('payment_proof'):
+                return jsonify({'success': False, 'error': 'Payment screenshot not found'}), 404
+        
+        file_name = result.get('payment_screenshot') or result.get('payment_proof')
+        if not file_name:
+            return jsonify({'success': False, 'error': 'Payment screenshot not found'}), 404
+        
+        # Build inplace URL to display the screenshot
+        inplace_url = url_for('admin_serve_file_inplace', internship_id=internship_id, file_type='payment', type='paid')
+        return jsonify({'success': True, 'file_name': file_name, 'inplace_url': inplace_url})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/admin/serve-file-inplace/<int:internship_id>/<file_type>')
+@login_required
+def admin_serve_file_inplace(internship_id, file_type):
+    """Serve file content inline for viewing in-browser.
+       Handles BLOB bytes or filename strings stored in DB.
+       Query param: type=free|paid
+       file_type: id_proof, resume, project, payment
+    """
+    internship_type = request.args.get('type', 'free')
+    column_map = {
+        'id_proof': 'id_proof',
+        'resume': 'resume',
+        'project': 'project_document',
+        'payment': 'payment_screenshot',  # fallback to payment_screenshot
+    }
+    
+    # If payment column not found, try payment_proof
+    if file_type == 'payment':
+        column = 'payment_screenshot'
+    else:
+        column = column_map.get(file_type, file_type)
+    
+    if file_type not in column_map and file_type != 'payment':
+        return ("Invalid file type", 400)
+
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+        table = get_resolved_table('paid_internship') if internship_type == 'paid' else get_resolved_table('free_internship')
+        query = f"SELECT {column} FROM {table} WHERE id = %s"
+        try:
+            cursor.execute(query, (internship_id,))
+            result = cursor.fetchone()
+        except Exception:
+            # Try payment_proof if payment_screenshot doesn't exist
+            if file_type == 'payment':
+                alt_query = f"SELECT payment_proof FROM {table} WHERE id = %s"
+                try:
+                    cursor.execute(alt_query, (internship_id,))
+                    result = cursor.fetchone()
+                except Exception:
+                    alt_table = table + '_application' if not table.endswith('_application') else table.replace('_application', '')
+                    alt_query = f"SELECT payment_proof FROM {alt_table} WHERE id = %s"
+                    cursor.execute(alt_query, (internship_id,))
+                    result = cursor.fetchone()
+            else:
+                alt_table = table + '_application' if not table.endswith('_application') else table.replace('_application', '')
+                alt_query = f"SELECT {column} FROM {alt_table} WHERE id = %s"
+                cursor.execute(alt_query, (internship_id,))
+                result = cursor.fetchone()
+
+        cursor.close()
+        conn.close()
+
+        if not result:
+            return ("File not found", 404)
+        
+        # Get the value (try both possible column names)
+        value = result.get(column) or result.get('payment_proof') or result.get('payment_screenshot')
+        if not value:
+            return ("File not found", 404)
+
+        # If DB stored file as bytes (BLOB)
+        if isinstance(value, (bytes, bytearray)):
+            data = bytes(value)
+            mime = 'application/octet-stream'
+            if data.startswith(b'%PDF'):
+                mime = 'application/pdf'
+            elif data.startswith(b'\xff\xd8'):
+                mime = 'image/jpeg'
+            elif data.startswith(b'\x89PNG'):
+                mime = 'image/png'
+            return send_file(io.BytesIO(data), mimetype=mime, as_attachment=False)
+
+        # If DB stored a string (filename or URL path)
+        if isinstance(value, str):
+            import os
+            if value.startswith('http://') or value.startswith('https://'):
+                return redirect(value)
+
+            local_path = os.path.join(app.root_path, UPLOAD_FOLDER, value)
+            if os.path.exists(local_path):
+                ext = os.path.splitext(value)[1].lower()
+                mime = 'application/octet-stream'
+                if ext == '.pdf':
+                    mime = 'application/pdf'
+                elif ext in ('.jpg', '.jpeg'):
+                    mime = 'image/jpeg'
+                elif ext == '.png':
+                    mime = 'image/png'
+                return send_from_directory(os.path.join(app.root_path, UPLOAD_FOLDER), value, as_attachment=False)
+
+            base = app.config.get('UPLOAD_URL_BASE') or f"https://{app.config.get('MYSQL_HOST')}/uploads"
+            external_url = base.rstrip('/') + '/' + value
+            return redirect(external_url)
+
+        return ("File format not supported", 415)
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return (f"Error: {str(e)}", 500)
+
+
 @app.route('/admin/job-description', methods=['GET', 'POST'])
 @login_required
 def admin_job_description():
