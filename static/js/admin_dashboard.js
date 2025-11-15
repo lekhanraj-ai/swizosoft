@@ -76,50 +76,56 @@ function populateTable(type, data) {
     
     countElem.textContent = data.length;
     
+    // Create table
+    const table = document.createElement('table');
+    table.className = 'applicants-table';
+    
+    // Table header
+    const thead = document.createElement('thead');
+    thead.innerHTML = `
+        <tr>
+            <th>Name</th>
+            <th>USN</th>
+            <th>View ID Proof</th>
+            <th>View Resume</th>
+            <th>View ${type === 'free' ? 'Project' : 'Payment'}</th>
+            <th>Action</th>
+        </tr>
+    `;
+    table.appendChild(thead);
+    
+    // Table body
+    const tbody = document.createElement('tbody');
+    
     data.forEach(row => {
-        const card = document.createElement('div');
-        card.className = 'applicant-card';
+        const tr = document.createElement('tr');
         
-        let fileButtons = '';
-        if (type === 'free') {
-            fileButtons = `
-                <button class="file-button" onclick="viewFile(${row.id}, 'id_proof', '${type}')">📄 View ID Proof</button>
-                <button class="file-button" onclick="viewFile(${row.id}, 'resume', '${type}')">📄 View Resume</button>
-                <button class="file-button" onclick="viewFile(${row.id}, 'project', '${type}')">📁 View Project</button>
-            `;
-        } else {
-            fileButtons = `
-                <button class="file-button" onclick="viewFile(${row.id}, 'id_proof', '${type}')">📄 View ID Proof</button>
-                <button class="file-button" onclick="viewFile(${row.id}, 'resume', '${type}')">📄 View Resume</button>
-                <button class="file-button" onclick="viewFile(${row.id}, 'payment', '${type}')">💳 View Payment Screenshot</button>
-            `;
-        }
+        const idProofBtn = `<button class="table-action-btn table-view-btn" onclick="viewFile(${row.id}, 'id_proof', '${type}')">View ID Proof</button>`;
+        const resumeBtn = `<button class="table-action-btn table-view-btn" onclick="viewFile(${row.id}, 'resume', '${type}')">View Resume</button>`;
+        const projectBtn = type === 'free' 
+            ? `<button class="table-action-btn table-view-btn" onclick="viewFile(${row.id}, 'project', '${type}')">View Project</button>`
+            : `<button class="table-action-btn table-view-btn" onclick="viewFile(${row.id}, 'payment', '${type}')">View Payment</button>`;
         
-        const status = row.status ? row.status.toUpperCase() : 'PENDING';
-        const statusClass = status === 'ACCEPTED' ? 'accepted' : status === 'REJECTED' ? 'rejected' : 'pending';
-        
-        card.innerHTML = `
-            <div class="card-header">
-                <div>
-                    <div class="applicant-name">${row.name || 'N/A'}</div>
-                    <div class="applicant-usn">USN: ${row.usn || 'N/A'}</div>
+        tr.innerHTML = `
+            <td class="table-name">${row.name || 'N/A'}</td>
+            <td class="table-usn">${row.usn || 'N/A'}</td>
+            <td>${idProofBtn}</td>
+            <td>${resumeBtn}</td>
+            <td>${projectBtn}</td>
+            <td>
+                <div class="table-actions">
+                    <button class="table-action-btn table-edit-btn" onclick="openEditModal(${row.id}, '${type}')">Edit</button>
+                    <button class="table-action-btn table-accept-btn" onclick="updateStatus(${row.id}, 'ACCEPTED', '${type}')">Accept</button>
+                    <button class="table-action-btn table-reject-btn" onclick="updateStatus(${row.id}, 'REJECTED', '${type}')">Reject</button>
                 </div>
-                <span class="card-status ${statusClass}">${status}</span>
-            </div>
-            
-            <div class="card-content">
-                ${fileButtons}
-            </div>
-            
-            <div class="action-buttons">
-                <button class="action-btn edit-btn" onclick="openEditModal(${row.id}, '${type}')">🖊️ Edit</button>
-                <button class="action-btn accept-btn" onclick="updateStatus(${row.id}, 'ACCEPTED', '${type}')">✓ Accept</button>
-                <button class="action-btn reject-btn" onclick="updateStatus(${row.id}, 'REJECTED', '${type}')">✕ Reject</button>
-            </div>
+            </td>
         `;
         
-        container.appendChild(card);
+        tbody.appendChild(tr);
     });
+    
+    table.appendChild(tbody);
+    container.appendChild(table);
 }
 
 function showError(type, message) {

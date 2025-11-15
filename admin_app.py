@@ -5,6 +5,7 @@ import pymysql.cursors
 import io
 from functools import wraps
 import admin_app
+import json
 
 # Minimal Admin-only Flask app
 app = Flask(__name__)
@@ -176,6 +177,58 @@ def admin_get_internships():
         conn.close()
         return jsonify({'success': True, 'data': rows})
     except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/admin/selected')
+@login_required
+def admin_selected():
+    return render_template('admin_selected.html')
+
+
+@app.route('/admin/api/get-selected')
+@login_required
+def admin_api_get_selected():
+    """Fetch all rows from Selected table using exact SQL query"""
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+        
+        # Execute exact query: SELECT * FROM `Selected`
+        try:
+            cursor.execute('SELECT * FROM `Selected`')
+            rows = cursor.fetchall()
+            print(f"✓ Fetched {len(rows)} rows from Selected table")
+            
+            # Convert bytes to base64 strings for JSON serialization
+            processed_rows = []
+            for row in rows:
+                if isinstance(row, dict):
+                    processed_row = {}
+                    for key, val in row.items():
+                        if isinstance(val, bytes):
+                            # Convert bytes to base64 string
+                            import base64
+                            processed_row[key] = base64.b64encode(val).decode('utf-8')
+                        else:
+                            processed_row[key] = val
+                    processed_rows.append(processed_row)
+                else:
+                    processed_rows.append(row)
+            
+            if processed_rows:
+                print(f"  First row keys: {list(processed_rows[0].keys())}")
+                
+        except Exception as e:
+            print(f"✗ Query failed: {e}")
+            processed_rows = []
+        
+        cursor.close()
+        conn.close()
+        
+        return jsonify({'success': True, 'data': processed_rows})
+    except Exception as e:
+        print(f"✗ Exception in /admin/api/get-selected: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -555,6 +608,197 @@ def admin_accept(user_id):
         conn.close()
     except Exception:
         pass
+
+    # If this is a paid internship, store the full applicant details in the Selected table
+    if internship_type == 'paid':
+        try:
+            conn = get_db()
+            cursor = conn.cursor()
+            paid_table = get_resolved_table('paid_internship')
+            # Try to fetch full row from paid table (with fallback)
+            row = None
+            try:
+                cursor.execute(f"SELECT * FROM {paid_table} WHERE id = %s LIMIT 1", (user_id,))
+                row = cursor.fetchone()
+            except Exception:
+                alt_table = paid_table + '_application' if not paid_table.endswith('_application') else paid_table.replace('_application', '')
+                try:
+                    cursor.execute(f"SELECT * FROM {alt_table} WHERE id = %s LIMIT 1", (user_id,))
+                    row = cursor.fetchone()
+                except Exception:
+                    row = None
+
+            # Check if a `Selected` table exists and get its columns
+            try:
+                cursor.execute(
+                    "SELECT COLUMN_NAME FROM information_schema.columns WHERE table_schema=%s AND table_name=%s",
+                    (app.config.get('MYSQL_DB'), 'Selected')
+                )
+                cols = [r['COLUMN_NAME'] for r in cursor.fetchall()]
+            except Exception:
+                cols = []
+
+            inserted = False
+
+            if cols:
+                # Table exists: try best-effort mapping of applicant row into Selected columns
+                try:
+                    # helper to normalize names
+                    def normalize(s):
+                        return ''.join(ch for ch in (s or '').lower() if ch.isalnum())
+
+                    selected_cols = cols
+                    lower_cols = [c.lower() for c in selected_cols]
+
+                    # Find duplicate-check column (prefer application_id/original_id)
+                    dup_col = None
+                    for candidate in ('application_id', 'original_id', 'applicationid', 'originalid'):
+                        if candidate in lower_cols:
+                            dup_col = next((c for c in selected_cols if c.lower() == candidate), None)
+                            break
+
+                    # Build existence check
+                    already = False
+                    if dup_col:
+                        try:
+                            if 'internship_type' in lower_cols:
+                                it_col = next((c for c in selected_cols if c.lower() == 'internship_type'), None)
+                                cursor.execute(f"SELECT 1 FROM Selected WHERE `{dup_col}` = %s AND `{it_col}` = %s LIMIT 1", (user_id, 'paid'))
+                            else:
+                                cursor.execute(f"SELECT 1 FROM Selected WHERE `{dup_col}` = %s LIMIT 1", (user_id,))
+                            already = cursor.fetchone() is not None
+                        except Exception:
+                            already = False
+
+                    if not already and row:
+                        # row expected to be dict (DictCursor)
+                        row_map = {k.lower(): v for k, v in (row.items() if isinstance(row, dict) else [])}
+                        insert_cols = []
+                        insert_vals = []
+
+                        # mapping synonyms
+                        synonyms = {
+                            'name': ['name', 'full_name', 'applicant_name', 'student_name'],
+                            'email': ['email', 'applicant_email', 'email_address'],
+                            'phone': ['phone', 'mobile', 'contact', 'phone_number'],
+                            'usn': ['usn', 'roll', 'rollno', 'roll_no'],
+                            'year': ['year', 'sem', 'semester', 'batch'],
+                            'qualification': ['qualification', 'degree'],
+                            'branch': ['branch', 'department', 'stream'],
+                            'college': ['college', 'institution', 'institute'],
+                            'domain': ['domain'],
+                            'resume_name': ['resume_name', 'resumefilename', 'resume_file_name', 'resume'],
+                        }
+
+                        for c in selected_cols:
+                            lc = c.lower()
+                            if lc in ('id', 'selected_at'):
+                                continue
+                            # handle id-like columns
+                            if lc in ('original_id', 'application_id', 'applicationid', 'originalid'):
+                                insert_cols.append(c)
+                                insert_vals.append(user_id)
+                                continue
+                            if lc == 'internship_type':
+                                insert_cols.append(c)
+                                insert_vals.append('paid')
+                                continue
+
+                            placed = False
+                            # direct key match
+                            if lc in row_map:
+                                insert_cols.append(c)
+                                insert_vals.append(row_map[lc])
+                                placed = True
+                                continue
+
+                            # try synonyms
+                            for target, keys in synonyms.items():
+                                if target == lc or target in lc or any(k in lc for k in keys):
+                                    for k in keys:
+                                        if k in row_map:
+                                            insert_cols.append(c)
+                                            insert_vals.append(row_map[k])
+                                            placed = True
+                                            break
+                                if placed:
+                                    break
+                            if placed:
+                                continue
+
+                            # try fuzzy match by normalized names
+                            norm_c = normalize(lc)
+                            best_key = None
+                            for rk in row_map.keys():
+                                if normalize(rk) == norm_c or norm_c in normalize(rk) or normalize(rk) in norm_c:
+                                    best_key = rk
+                                    break
+                            if best_key:
+                                insert_cols.append(c)
+                                insert_vals.append(row_map[best_key])
+                                continue
+
+                            # leave NULL if nothing matched
+
+                        if insert_cols:
+                            placeholders = ','.join(['%s'] * len(insert_vals))
+                            cols_sql = ','.join([f"`{c}`" for c in insert_cols])
+                            insert_sql = f"INSERT INTO Selected ({cols_sql}) VALUES ({placeholders})"
+                            cursor.execute(insert_sql, tuple(insert_vals))
+                            conn.commit()
+                            inserted = True
+                except Exception:
+                    inserted = False
+
+            if not inserted:
+                # Fallback: create a generic Selected table (if not present) and store JSON
+                try:
+                    create_sql = (
+                        "CREATE TABLE IF NOT EXISTS Selected ("
+                        "id INT AUTO_INCREMENT PRIMARY KEY,"
+                        "original_id INT NOT NULL,"
+                        "internship_type VARCHAR(20),"
+                        "name VARCHAR(255),"
+                        "email VARCHAR(255),"
+                        "data LONGTEXT,"
+                        "selected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+                        ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+                    )
+                    cursor.execute(create_sql)
+                    conn.commit()
+                except Exception:
+                    pass
+
+                try:
+                    cursor.execute("SELECT id FROM Selected WHERE original_id = %s AND internship_type = %s LIMIT 1", (user_id, 'paid'))
+                    exists = cursor.fetchone()
+                    if not exists and row:
+                        name_val = None
+                        email_val = None
+                        if isinstance(row, dict):
+                            for k in row.keys():
+                                lk = k.lower()
+                                if not name_val and lk in ('name', 'full_name', 'applicant_name', 'student_name'):
+                                    name_val = row[k]
+                                if not email_val and 'email' in lk:
+                                    email_val = row[k]
+                        data_json = json.dumps(row, default=str)
+                        insert_sql = "INSERT INTO Selected (original_id, internship_type, name, email, data) VALUES (%s, %s, %s, %s, %s)"
+                        cursor.execute(insert_sql, (user_id, 'paid', name_val, email_val, data_json))
+                        conn.commit()
+                except Exception:
+                    pass
+
+            try:
+                cursor.close()
+            except Exception:
+                pass
+            try:
+                conn.close()
+            except Exception:
+                pass
+        except Exception:
+            pass
 
     ok = send_accept_email(email, name or '')
     if ok:
@@ -1359,4 +1603,7 @@ if __name__ == '__main__':
         print('Server listening at http://127.0.0.1:5000', file=sys.stderr)
     except Exception:
         pass
-    app.run(host='127.0.0.1', port=5000, debug=app.debug, use_reloader=False)
+    # Disable the interactive debugger resources in production/dev-run by forcing debug=False
+    # If you need debug features, set them explicitly via config and be aware
+    # that the Werkzeug debugger will serve extra resources (seen as __debugger__ requests).
+    app.run(host='127.0.0.1', port=5000, debug=False, use_reloader=False)

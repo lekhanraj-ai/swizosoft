@@ -15,6 +15,7 @@
             </div>
             <div class="navbar-menu">
                 <a href="{{ url_for('admin_dashboard') }}" class="nav-link active">Dashboard</a>
+                <a href="{{ url_for('admin_selected') }}" class="nav-link">Selected Candidates</a>
                 <a href="{{ url_for('admin_job_description') }}" class="nav-link">Job Description</a>
                 <a href="{{ url_for('admin_logout') }}" class="nav-link logout-link">Logout</a>
             </div>
@@ -45,7 +46,7 @@
                     <p>Applications received: <span class="count-badge" id="free-count">0</span></p>
                 </div>
             </div>
-            <div class="cards-container" id="freeTableBody">
+            <div class="table-container" id="freeTableBody">
                 <div class="loading-card">
                     <div class="spinner"></div>
                     <p>Loading applications...</p>
@@ -61,7 +62,7 @@
                     <p>Applications received: <span class="count-badge" id="paid-count">0</span></p>
                 </div>
             </div>
-            <div class="cards-container" id="paidTableBody">
+            <div class="table-container" id="paidTableBody">
                 <div class="loading-card">
                     <div class="spinner"></div>
                     <p>Loading applications...</p>
