@@ -182,27 +182,60 @@ def admin_get_internships():
 @app.route('/admin/api/get-file/<int:internship_id>/<file_type>')
 @login_required
 def admin_get_file(internship_id, file_type):
-    """Get file path from database
+    """Get file from database (either from document_store BLOB or application string column)
        file_type: id_proof, resume, project
-       Returns: {file_name: "...", file_type: "..."}
+       Returns: inplace_url to fetch the BLOB
     """
     internship_type = request.args.get('type', 'free')
 
-    column_map = {
-        'id_proof': 'id_proof',
-        'resume': 'resume',
-        'project': 'project_document',
+    blob_column_map = {
+        'id_proof': 'id_proof_content',
+        'resume': 'resume_content',
+        'project': 'project_document_content',
     }
 
-    if file_type not in column_map:
+    if file_type not in blob_column_map:
         return jsonify({'error': 'Invalid file type'}), 400
 
-    column = column_map[file_type]
-
     try:
+        # First, try to fetch from document_store (BLOBs)
+        conn = get_db()
+        cursor = conn.cursor()
+        
+        # Determine document store table name
+        doc_store_table = 'paid_document_store' if internship_type == 'paid' else 'free_document_store'
+        app_id_col = 'paid_internship_application_id' if internship_type == 'paid' else 'free_internship_application_id'
+        blob_col = blob_column_map[file_type]
+        
+        try:
+            # Try to fetch from document_store
+            query = f"SELECT {blob_col} FROM {doc_store_table} WHERE {app_id_col} = %s"
+            cursor.execute(query, (internship_id,))
+            result = cursor.fetchone()
+        except Exception:
+            # Try alternate table name or column name
+            result = None
+        
+        cursor.close()
+        conn.close()
+        
+        # If found BLOB in document_store, use inplace_url to serve it
+        if result and result.get(blob_col):
+            inplace_url = url_for('admin_serve_file_inplace', internship_id=internship_id, file_type=file_type, type=internship_type)
+            return jsonify({'success': True, 'file_name': f'{file_type}.blob', 'file_type': file_type, 'inplace_url': inplace_url})
+        
+        # Fallback: try to get filename from application table
         conn = get_db()
         cursor = conn.cursor()
         table = get_resolved_table('paid_internship') if internship_type == 'paid' else get_resolved_table('free_internship')
+        
+        column_map = {
+            'id_proof': 'id_proof',
+            'resume': 'resume',
+            'project': 'project_document',
+        }
+        column = column_map[file_type]
+        
         query = f"SELECT {column} FROM {table} WHERE id = %s"
         try:
             cursor.execute(query, (internship_id,))
@@ -519,52 +552,91 @@ def admin_get_payment_screenshots(internship_id):
 @login_required
 def admin_serve_file_inplace(internship_id, file_type):
     """Serve file content inline for viewing in-browser.
-       Handles BLOB bytes or filename strings stored in DB.
+       Tries document_store (BLOBs) first, then falls back to filenames or URLs.
        Query param: type=free|paid
        file_type: id_proof, resume, project, payment
     """
     internship_type = request.args.get('type', 'free')
-    column_map = {
-        'id_proof': 'id_proof',
-        'resume': 'resume',
-        'project': 'project_document',
-        'payment': 'payment_screenshot',  # fallback to payment_screenshot
-    }
     
-    # If payment column not found, try payment_proof
-    if file_type == 'payment':
-        column = 'payment_screenshot'
-    else:
-        column = column_map.get(file_type, file_type)
-    
-    if file_type not in column_map and file_type != 'payment':
+    if file_type not in ('id_proof', 'resume', 'project', 'payment'):
         return ("Invalid file type", 400)
 
     try:
         conn = get_db()
         cursor = conn.cursor()
+        
+        # First, try document_store for BLOBs
+        if file_type != 'payment':
+            doc_store_table = 'paid_document_store' if internship_type == 'paid' else 'free_document_store'
+            app_id_col = 'paid_internship_application_id' if internship_type == 'paid' else 'free_internship_application_id'
+            
+            blob_column_map = {
+                'id_proof': 'id_proof_content',
+                'resume': 'resume_content',
+                'project': 'project_document_content',
+            }
+            blob_col = blob_column_map.get(file_type)
+            
+            if blob_col:
+                try:
+                    query = f"SELECT {blob_col} FROM {doc_store_table} WHERE {app_id_col} = %s"
+                    cursor.execute(query, (internship_id,))
+                    result = cursor.fetchone()
+                    if result and result.get(blob_col):
+                        data = bytes(result.get(blob_col))
+                        mime = 'application/octet-stream'
+                        if data.startswith(b'%PDF'):
+                            mime = 'application/pdf'
+                        elif data.startswith(b'\xff\xd8'):
+                            mime = 'image/jpeg'
+                        elif data.startswith(b'\x89PNG'):
+                            mime = 'image/png'
+                        elif data.startswith(b'PK\x03\x04'):  # DOCX/XLSX magic bytes
+                            if b'word' in data[:1000]:
+                                mime = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+                            else:
+                                mime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                        cursor.close()
+                        conn.close()
+                        return send_file(io.BytesIO(data), mimetype=mime, as_attachment=False)
+                except Exception:
+                    pass
+        
+        # Fallback: try application table (filenames or URLs)
         table = get_resolved_table('paid_internship') if internship_type == 'paid' else get_resolved_table('free_internship')
+        
+        column_map = {
+            'id_proof': 'id_proof',
+            'resume': 'resume',
+            'project': 'project_document',
+            'payment': 'payment_screenshot',
+        }
+        column = column_map.get(file_type, file_type)
+        
         query = f"SELECT {column} FROM {table} WHERE id = %s"
         try:
             cursor.execute(query, (internship_id,))
             result = cursor.fetchone()
         except Exception:
-            # Try payment_proof if payment_screenshot doesn't exist
             if file_type == 'payment':
-                alt_query = f"SELECT payment_proof FROM {table} WHERE id = %s"
+                # Try payment_proof for payment files
                 try:
-                    cursor.execute(alt_query, (internship_id,))
+                    query = f"SELECT payment_proof FROM {table} WHERE id = %s"
+                    cursor.execute(query, (internship_id,))
                     result = cursor.fetchone()
                 except Exception:
-                    alt_table = table + '_application' if not table.endswith('_application') else table.replace('_application', '')
-                    alt_query = f"SELECT payment_proof FROM {alt_table} WHERE id = %s"
-                    cursor.execute(alt_query, (internship_id,))
-                    result = cursor.fetchone()
+                    result = None
             else:
-                alt_table = table + '_application' if not table.endswith('_application') else table.replace('_application', '')
-                alt_query = f"SELECT {column} FROM {alt_table} WHERE id = %s"
-                cursor.execute(alt_query, (internship_id,))
+                result = None
+
+        if not result:
+            alt_table = table + '_application' if not table.endswith('_application') else table.replace('_application', '')
+            try:
+                query = f"SELECT {column} FROM {alt_table} WHERE id = %s"
+                cursor.execute(query, (internship_id,))
                 result = cursor.fetchone()
+            except Exception:
+                result = None
 
         cursor.close()
         conn.close()
@@ -572,7 +644,7 @@ def admin_serve_file_inplace(internship_id, file_type):
         if not result:
             return ("File not found", 404)
         
-        # Get the value (try both possible column names)
+        # Get the value (try column or payment_proof)
         value = result.get(column) or result.get('payment_proof') or result.get('payment_screenshot')
         if not value:
             return ("File not found", 404)
@@ -587,6 +659,8 @@ def admin_serve_file_inplace(internship_id, file_type):
                 mime = 'image/jpeg'
             elif data.startswith(b'\x89PNG'):
                 mime = 'image/png'
+            elif data.startswith(b'PK\x03\x04'):  # DOCX/XLSX
+                mime = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
             return send_file(io.BytesIO(data), mimetype=mime, as_attachment=False)
 
         # If DB stored a string (filename or URL path)
@@ -610,6 +684,13 @@ def admin_serve_file_inplace(internship_id, file_type):
             base = app.config.get('UPLOAD_URL_BASE') or f"https://{app.config.get('MYSQL_HOST')}/uploads"
             external_url = base.rstrip('/') + '/' + value
             return redirect(external_url)
+
+        return ("File format not supported", 415)
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return (f"Error: {str(e)}", 500)
 
         return ("File format not supported", 415)
 
