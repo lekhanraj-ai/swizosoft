@@ -808,18 +808,25 @@ def admin_accept(user_id):
                 
                 # Insert into Selected table
                 try:
-                    insert_sql = """INSERT INTO Selected 
-                    (application_id, name, email, phone, usn, year, qualification, branch, college, domain, 
-                     project_description, internship_project_name, internship_project_content, project_title)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
+                    # Check if applicant already exists in Selected
+                    cursor.execute("SELECT id FROM Selected WHERE application_id = %s LIMIT 1", (application_id,))
+                    existing = cursor.fetchone()
                     
-                    cursor.execute(insert_sql, (
-                        application_id, name_val, email_val, phone_val, usn_val, year_val,
-                        qualification_val, branch_val, college_val, domain_val,
-                        project_description_val, project_name_val, project_blob, project_name_val
-                    ))
-                    conn.commit()
-                    app.logger.info(f"Successfully inserted paid applicant {user_id} ({name_val}) into Selected")
+                    if existing:
+                        app.logger.warning(f"Paid applicant {user_id} ({name_val}) already exists in Selected table (ID: {existing['id']})")
+                    else:
+                        insert_sql = """INSERT INTO Selected 
+                        (application_id, name, email, phone, usn, year, qualification, branch, college, domain, 
+                         project_description, internship_project_name, internship_project_content, project_title)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
+                        
+                        cursor.execute(insert_sql, (
+                            application_id, name_val, email_val, phone_val, usn_val, year_val,
+                            qualification_val, branch_val, college_val, domain_val,
+                            project_description_val, project_name_val, project_blob, project_name_val
+                        ))
+                        conn.commit()
+                        app.logger.info(f"Successfully inserted paid applicant {user_id} ({name_val}) into Selected")
                     
                     # Now delete original records
                     try:
