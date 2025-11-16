@@ -759,192 +759,98 @@ def admin_accept(user_id):
             conn = get_db()
             cursor = conn.cursor()
             paid_table = get_resolved_table('paid_internship')
-            # Try to fetch full row from paid table (with fallback)
+            
+            # Fetch applicant row
             row = None
             try:
                 cursor.execute(f"SELECT * FROM {paid_table} WHERE id = %s LIMIT 1", (user_id,))
                 row = cursor.fetchone()
-            except Exception:
-                alt_table = paid_table + '_application' if not paid_table.endswith('_application') else paid_table.replace('_application', '')
+            except Exception as e:
+                alt_table = paid_table.replace('_application', '') if paid_table.endswith('_application') else paid_table + '_application'
                 try:
                     cursor.execute(f"SELECT * FROM {alt_table} WHERE id = %s LIMIT 1", (user_id,))
                     row = cursor.fetchone()
                 except Exception:
-                    row = None
+                    pass
 
-            # Check if a `Selected` table exists and get its columns
-            try:
-                cursor.execute(
-                    "SELECT COLUMN_NAME FROM information_schema.columns WHERE table_schema=%s AND table_name=%s",
-                    (app.config.get('MYSQL_DB'), 'Selected')
-                )
-                cols = [r['COLUMN_NAME'] for r in cursor.fetchall()]
-            except Exception:
-                cols = []
-
-            inserted = False
-
-            if cols:
-                # Table exists: try best-effort mapping of applicant row into Selected columns
+            if row:
+                # Extract basic info
+                row_map = {k.lower(): v for k, v in (row.items() if isinstance(row, dict) else [])}
+                
+                application_id = user_id
+                name_val = row_map.get('name') or row_map.get('full_name') or ''
+                email_val = row_map.get('email') or row_map.get('applicant_email') or ''
+                phone_val = row_map.get('phone') or row_map.get('mobile') or row_map.get('contact_number') or ''
+                usn_val = row_map.get('usn') or row_map.get('roll') or ''
+                year_val = row_map.get('year') or row_map.get('sem') or ''
+                qualification_val = row_map.get('qualification') or ''
+                branch_val = row_map.get('branch') or row_map.get('department') or ''
+                college_val = row_map.get('college') or ''
+                domain_val = row_map.get('domain') or ''
+                project_description_val = row_map.get('project_description') or ''
+                project_name_val = row_map.get('project_document') or row_map.get('project_name') or ''
+                
+                # Fetch document BLOBs
+                project_blob = None
                 try:
-                    # helper to normalize names
-                    def normalize(s):
-                        return ''.join(ch for ch in (s or '').lower() if ch.isalnum())
-
-                    selected_cols = cols
-                    lower_cols = [c.lower() for c in selected_cols]
-
-                    # Find duplicate-check column (prefer application_id/original_id)
-                    dup_col = None
-                    for candidate in ('application_id', 'original_id', 'applicationid', 'originalid'):
-                        if candidate in lower_cols:
-                            dup_col = next((c for c in selected_cols if c.lower() == candidate), None)
-                            break
-
-                    # Build existence check
-                    already = False
-                    if dup_col:
-                        try:
-                            if 'internship_type' in lower_cols:
-                                it_col = next((c for c in selected_cols if c.lower() == 'internship_type'), None)
-                                cursor.execute(f"SELECT 1 FROM Selected WHERE `{dup_col}` = %s AND `{it_col}` = %s LIMIT 1", (user_id, 'paid'))
-                            else:
-                                cursor.execute(f"SELECT 1 FROM Selected WHERE `{dup_col}` = %s LIMIT 1", (user_id,))
-                            already = cursor.fetchone() is not None
-                        except Exception:
-                            already = False
-
-                    if not already and row:
-                        # row expected to be dict (DictCursor)
-                        row_map = {k.lower(): v for k, v in (row.items() if isinstance(row, dict) else [])}
-                        insert_cols = []
-                        insert_vals = []
-
-                        # mapping synonyms
-                        synonyms = {
-                            'name': ['name', 'full_name', 'applicant_name', 'student_name'],
-                            'email': ['email', 'applicant_email', 'email_address'],
-                            'phone': ['phone', 'mobile', 'contact', 'phone_number'],
-                            'usn': ['usn', 'roll', 'rollno', 'roll_no'],
-                            'year': ['year', 'sem', 'semester', 'batch'],
-                            'qualification': ['qualification', 'degree'],
-                            'branch': ['branch', 'department', 'stream'],
-                            'college': ['college', 'institution', 'institute'],
-                            'domain': ['domain'],
-                            'resume_name': ['resume_name', 'resumefilename', 'resume_file_name', 'resume'],
-                        }
-
-                        for c in selected_cols:
-                            lc = c.lower()
-                            if lc in ('id', 'selected_at'):
-                                continue
-                            # handle id-like columns
-                            if lc in ('original_id', 'application_id', 'applicationid', 'originalid'):
-                                insert_cols.append(c)
-                                insert_vals.append(user_id)
-                                continue
-                            if lc == 'internship_type':
-                                insert_cols.append(c)
-                                insert_vals.append('paid')
-                                continue
-
-                            placed = False
-                            # direct key match
-                            if lc in row_map:
-                                insert_cols.append(c)
-                                insert_vals.append(row_map[lc])
-                                placed = True
-                                continue
-
-                            # try synonyms
-                            for target, keys in synonyms.items():
-                                if target == lc or target in lc or any(k in lc for k in keys):
-                                    for k in keys:
-                                        if k in row_map:
-                                            insert_cols.append(c)
-                                            insert_vals.append(row_map[k])
-                                            placed = True
-                                            break
-                                if placed:
-                                    break
-                            if placed:
-                                continue
-
-                            # try fuzzy match by normalized names
-                            norm_c = normalize(lc)
-                            best_key = None
-                            for rk in row_map.keys():
-                                if normalize(rk) == norm_c or norm_c in normalize(rk) or normalize(rk) in norm_c:
-                                    best_key = rk
-                                    break
-                            if best_key:
-                                insert_cols.append(c)
-                                insert_vals.append(row_map[best_key])
-                                continue
-
-                            # leave NULL if nothing matched
-
-                        if insert_cols:
-                            placeholders = ','.join(['%s'] * len(insert_vals))
-                            cols_sql = ','.join([f"`{c}`" for c in insert_cols])
-                            insert_sql = f"INSERT INTO Selected ({cols_sql}) VALUES ({placeholders})"
-                            cursor.execute(insert_sql, tuple(insert_vals))
-                            conn.commit()
-                            inserted = True
-                except Exception:
-                    inserted = False
-
-            if not inserted:
-                # Fallback: create a generic Selected table (if not present) and store JSON
-                try:
-                    create_sql = (
-                        "CREATE TABLE IF NOT EXISTS Selected ("
-                        "id INT AUTO_INCREMENT PRIMARY KEY,"
-                        "original_id INT NOT NULL,"
-                        "internship_type VARCHAR(20),"
-                        "name VARCHAR(255),"
-                        "email VARCHAR(255),"
-                        "data LONGTEXT,"
-                        "selected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
-                        ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+                    cursor.execute(
+                        "SELECT project_document_content FROM paid_document_store WHERE paid_internship_application_id = %s LIMIT 1",
+                        (user_id,)
                     )
-                    cursor.execute(create_sql)
-                    conn.commit()
+                    blob_row = cursor.fetchone()
+                    if blob_row:
+                        if isinstance(blob_row, dict):
+                            project_blob = blob_row.get('project_document_content')
+                        else:
+                            project_blob = blob_row[0]
                 except Exception:
                     pass
-
+                
+                # Insert into Selected table
                 try:
-                    cursor.execute("SELECT id FROM Selected WHERE original_id = %s AND internship_type = %s LIMIT 1", (user_id, 'paid'))
-                    exists = cursor.fetchone()
-                    if not exists and row:
-                        name_val = None
-                        email_val = None
-                        if isinstance(row, dict):
-                            for k in row.keys():
-                                lk = k.lower()
-                                if not name_val and lk in ('name', 'full_name', 'applicant_name', 'student_name'):
-                                    name_val = row[k]
-                                if not email_val and 'email' in lk:
-                                    email_val = row[k]
-                        data_json = json.dumps(row, default=str)
-                        insert_sql = "INSERT INTO Selected (original_id, internship_type, name, email, data) VALUES (%s, %s, %s, %s, %s)"
-                        cursor.execute(insert_sql, (user_id, 'paid', name_val, email_val, data_json))
+                    insert_sql = """INSERT INTO Selected 
+                    (application_id, name, email, phone, usn, year, qualification, branch, college, domain, 
+                     project_description, internship_project_name, internship_project_content, project_title)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
+                    
+                    cursor.execute(insert_sql, (
+                        application_id, name_val, email_val, phone_val, usn_val, year_val,
+                        qualification_val, branch_val, college_val, domain_val,
+                        project_description_val, project_name_val, project_blob, project_name_val
+                    ))
+                    conn.commit()
+                    app.logger.info(f"Successfully inserted paid applicant {user_id} ({name_val}) into Selected")
+                    
+                    # Now delete original records
+                    try:
+                        cursor.execute("DELETE FROM paid_document_store WHERE paid_internship_application_id = %s", (user_id,))
                         conn.commit()
-                except Exception:
-                    pass
+                    except Exception as e:
+                        app.logger.warning(f"Could not delete documents: {e}")
+                    
+                    try:
+                        cursor.execute(f"DELETE FROM {paid_table} WHERE id = %s", (user_id,))
+                        conn.commit()
+                        app.logger.info(f"Deleted original paid application for {user_id}")
+                    except Exception:
+                        alt_table = paid_table.replace('_application', '') if paid_table.endswith('_application') else paid_table + '_application'
+                        try:
+                            cursor.execute(f"DELETE FROM {alt_table} WHERE id = %s", (user_id,))
+                            conn.commit()
+                        except Exception as e:
+                            app.logger.warning(f"Could not delete from {alt_table}: {e}")
+                            
+                except Exception as e:
+                    app.logger.error(f"Error inserting/deleting paid applicant {user_id}: {e}")
+                    conn.rollback()
+            else:
+                app.logger.error(f"Could not find paid applicant {user_id}")
+            
+            cursor.close()
+            conn.close()
+        except Exception as e:
+            app.logger.exception(f"Error processing paid internship for {user_id}: {e}")
 
-            try:
-                cursor.close()
-            except Exception:
-                pass
-            try:
-                conn.close()
-            except Exception:
-                pass
-        except Exception:
-            pass
-
-    # If this is a free internship, store the full applicant details in the approved_candidates table
     elif internship_type == 'free':
         try:
             conn = get_db()
@@ -1085,7 +991,7 @@ def admin_accept(user_id):
         # NOTE: intentionally do NOT add a `report_link` into `details_for_email` to avoid showing it in the email
         interview_link = 'http://127.0.0.1:5000/interview-scheduler'
 
-    ok = send_accept_email(email, name or '', details=details_for_email, interview_link=interview_link)
+    ok = send_accept_email(email, name or '', details=details_for_email, interview_link=interview_link, internship_type=internship_type)
     if ok:
         return jsonify({'success': True, 'message': 'Accept email sent'})
     else:
@@ -1094,6 +1000,7 @@ def admin_accept(user_id):
 @app.route('/reject/<int:user_id>', methods=['POST'])
 @login_required
 def admin_reject(user_id):
+    """Reject an internship application: delete all candidate data and documents completely."""
     internship_type = request.args.get('type', 'free')
     reason = request.form.get('reason', '') or request.get_json().get('reason', '') if request.is_json else request.form.get('reason', '')
     
@@ -1101,31 +1008,58 @@ def admin_reject(user_id):
     if not email:
         return jsonify({'success': False, 'error': 'Applicant email not found'}), 404
 
-    # Update status in DB (best-effort)
+    # Delete all candidate data and documents from database
     try:
         conn = get_db()
         cursor = conn.cursor()
-        table = get_resolved_table('paid_internship') if internship_type == 'paid' else get_resolved_table('free_internship')
+        
+        # Determine table names based on internship type
+        if internship_type == 'paid':
+            app_table = get_resolved_table('paid_internship')
+            doc_store_table = 'paid_document_store'
+        else:
+            app_table = get_resolved_table('free_internship')
+            doc_store_table = 'free_document_store'
+        
+        # Try to delete from document store first (by application ID foreign key)
         try:
-            cursor.execute(f"UPDATE {table} SET status = %s WHERE id = %s", ('REJECTED', user_id))
+            if internship_type == 'paid':
+                cursor.execute(f"DELETE FROM {doc_store_table} WHERE paid_internship_application_id = %s", (user_id,))
+            else:
+                cursor.execute(f"DELETE FROM {doc_store_table} WHERE free_internship_application_id = %s", (user_id,))
             conn.commit()
-        except Exception:
-            alt = table + '_application' if not table.endswith('_application') else table.replace('_application', '')
+        except Exception as e:
+            app.logger.warning(f"Could not delete from {doc_store_table}: {e}")
+        
+        # Delete from application table
+        try:
+            cursor.execute(f"DELETE FROM {app_table} WHERE id = %s", (user_id,))
+            conn.commit()
+        except Exception as e:
+            # Try alternate table name
+            app.logger.warning(f"Could not delete from {app_table}: {e}")
+            alt_table = app_table + '_application' if not app_table.endswith('_application') else app_table.replace('_application', '')
             try:
-                cursor.execute(f"UPDATE {alt} SET status = %s WHERE id = %s", ('REJECTED', user_id))
+                cursor.execute(f"DELETE FROM {alt_table} WHERE id = %s", (user_id,))
                 conn.commit()
-            except Exception:
-                pass
+            except Exception as e2:
+                app.logger.error(f"Could not delete from {alt_table}: {e2}")
+                cursor.close()
+                conn.close()
+                return jsonify({'success': False, 'error': 'Failed to delete application record'}), 500
+        
         cursor.close()
         conn.close()
-    except Exception:
-        pass
+    except Exception as e:
+        app.logger.error(f"Database error during rejection: {e}")
+        return jsonify({'success': False, 'error': 'Database error during deletion'}), 500
 
-    ok = send_reject_email(email, name or '', reason)
+    # Send rejection email to applicant
+    ok = send_reject_email(email, name or '', reason, internship_type=internship_type)
     if ok:
-        return jsonify({'success': True, 'message': 'Rejection email sent'})
+        return jsonify({'success': True, 'message': 'Application rejected and all data deleted. Rejection email sent'})
     else:
-        return jsonify({'success': False, 'error': 'Failed to send email'}), 500
+        return jsonify({'success': False, 'error': 'Failed to send rejection email'}), 500
 
 
 @app.route('/admin/api/get-rejection-reasons')
@@ -1147,7 +1081,28 @@ def admin_api_get_rejection_reasons():
         'Interview performance unsatisfactory',
         'Not meeting location requirements',
         'Salary expectations mismatch',
-        'Background check issues'
+        'Background check issues',
+        'Duplicate application',
+        'Falsified credentials or information',
+        'Unable to relocate',
+        'Visa sponsorship not available',
+        'Minimum GPA requirement not met',
+        'Previous negative reference',
+        'Insufficient project portfolio',
+        'Failed coding test',
+        'Attendance concerns',
+        'Overqualified for the position',
+        'Failed to attend interview',
+        'No show on interview day',
+        'Poor GitHub profile or code quality',
+        'Weak problem-solving skills',
+        'Does not meet domain expertise',
+        'Behavioral red flags',
+        'Not aligned with company values',
+        'Budget constraints',
+        'Internship role cancelled',
+        'Team capacity full',
+        'Other'
     ]
     return jsonify({'success': True, 'reasons': reasons})
 

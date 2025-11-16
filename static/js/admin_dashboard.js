@@ -480,6 +480,23 @@ function showRejectionModal(internshipId, internshipType) {
     currentRejectInternshipId = internshipId;
     currentRejectInternshipType = internshipType;
     
+    // Fetch candidate information first
+    fetch(`/admin/api/get-profile/${internshipId}?type=${internshipType}`)
+        .then(r => r.json())
+        .then(candidateData => {
+            // Populate candidate information in the modal
+            const profile = candidateData.data || {};
+            document.getElementById('rejectCandidateName').textContent = profile.name || profile.full_name || 'N/A';
+            document.getElementById('rejectCandidateUSN').textContent = profile.usn || profile.roll || profile.rollno || 'N/A';
+            document.getElementById('rejectCandidateEmail').textContent = profile.email || profile.applicant_email || 'N/A';
+        })
+        .catch(err => {
+            console.error('Error fetching candidate info:', err);
+            document.getElementById('rejectCandidateName').textContent = 'N/A';
+            document.getElementById('rejectCandidateUSN').textContent = 'N/A';
+            document.getElementById('rejectCandidateEmail').textContent = 'N/A';
+        });
+    
     // Fetch rejection reasons
     fetch('/admin/api/get-rejection-reasons')
         .then(r => r.json())
@@ -492,10 +509,10 @@ function showRejectionModal(internshipId, internshipType) {
                     const div = document.createElement('div');
                     div.className = 'rejection-reason-item';
                     div.textContent = reason;
-                    div.onclick = () => confirmReject(reason);
+                    div.onclick = () => performReject(reason);
                     reasonsList.appendChild(div);
                 });
-                
+
                 document.getElementById('rejectionModal').style.display = 'flex';
             }
         })
@@ -508,12 +525,17 @@ function closeRejectionModal() {
     currentRejectInternshipType = null;
 }
 
-function confirmReject(reason) {
-    if (!currentRejectInternshipId) return;
-    
+function performReject(reason) {
+    if (!currentRejectInternshipId || !reason) {
+        alert('Please select a reason.');
+        return;
+    }
+
+    if (!confirm('Are you sure? This will delete all applicant data and send rejection email.')) return;
+
     const formData = new FormData();
     formData.append('reason', reason);
-    
+
     fetch(`/reject/${currentRejectInternshipId}?type=${currentRejectInternshipType}`, {
         method: 'POST',
         body: formData
