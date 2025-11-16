@@ -86,9 +86,9 @@ body {
 
 /* ===== DASHBOARD CONTAINER ===== */
 .dashboard-container {
-    max-width: 1200px;
+    max-width: 100%; /* use full viewport width to match screenshot */
     margin: 0 auto;
-    padding: 40px 20px;
+    padding: 60px 80px; /* generous side padding */
 }
 
 .dashboard-container.full-width {
@@ -185,16 +185,51 @@ body {
 /* ===== TABLE LAYOUT ===== */
 .table-container {
     width: 100%;
-    overflow-x: auto;
-    background: white;
-    border-radius: 8px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    /* Allow the table to expand naturally and avoid an inner scrollbar */
+    overflow-x: visible;
+    background: transparent; /* let the table itself be the white card */
+    border-radius: 0;
+    box-shadow: none;
+    padding: 8px 0; /* vertical spacing around the card */
+}
+
+/* Center the table card inside the page */
+.table-container {
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
 }
 
 .applicants-table {
     width: 100%;
-    border-collapse: collapse;
+    border-collapse: separate;
+    border-spacing: 0;
     font-size: 14px;
+    background: #ffffff;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 6px 20px rgba(12,30,44,0.06);
+}
+
+/* Ensure consistent fixed layout and wrapping to prevent horizontal scrolling */
+.applicants-table,
+.candidates-table,
+.internship-table {
+    table-layout: fixed;
+    width: 100%;
+    max-width: 1200px; /* constrain width so table is centered and matches navbar */
+    margin: 0 auto;    /* center when there's extra space */
+}
+
+.applicants-table th,
+.applicants-table td,
+.candidates-table th,
+.candidates-table td,
+.internship-table th,
+.internship-table td {
+    /* Allow content to wrap instead of forcing table wider */
+    white-space: normal;
+    word-break: break-word;
 }
 
 .applicants-table thead {
@@ -203,14 +238,14 @@ body {
 }
 
 .applicants-table th {
-    padding: 14px 16px;
+    padding: 10px 12px;
     text-align: left;
     font-weight: 600;
     color: #333;
 }
 
 .applicants-table td {
-    padding: 14px 16px;
+    padding: 10px 12px;
     border-bottom: 1px solid #f0f0f0;
     color: #555;
 }
@@ -235,22 +270,39 @@ body {
 
 .table-actions {
     display: flex;
-    gap: 6px;
+    gap: 12px;
 }
 
 .table-action-btn {
-    padding: 6px 12px;
+    padding: 6px 10px;
     border: none;
-    border-radius: 4px;
+    border-radius: 6px;
     font-size: 12px;
-    font-weight: 600;
+    font-weight: 700;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all 0.12s ease;
+    display: inline-block;
+    white-space: nowrap;
+    text-align: center;
+    min-width: 72px;
+}
+
+/* Container for action buttons in table rows */
+.table-actions {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: nowrap;
+    white-space: nowrap;
 }
 
 .table-view-btn {
     background: #667eea;
     color: white;
+    padding: 8px 10px;
+    font-size: 12px;
+    min-width: 84px;
 }
 
 .table-view-btn:hover {
@@ -284,6 +336,35 @@ body {
 
 .table-edit-btn:hover {
     background: #e0a800;
+}
+
+/* Specific sizing for action types */
+.table-edit-btn {
+    min-width: 48px;
+    padding: 6px 8px;
+    font-size: 12px;
+}
+.table-accept-btn, .table-reject-btn {
+    min-width: 74px;
+    padding: 6px 10px;
+    font-size: 12px;
+}
+
+/* Reserve space for action column so buttons don't wrap */
+.applicants-table td:last-child,
+.candidates-table td:last-child,
+.internship-table td:last-child {
+    width: 420px; /* more room for action buttons */
+}
+
+/* If the viewport is narrow, allow the action column to shrink gracefully */
+@media (max-width: 900px) {
+    .applicants-table td:last-child,
+    .candidates-table td:last-child,
+    .internship-table td:last-child {
+        width: 220px;
+    }
+    .table-action-btn { font-size: 12px; min-width: 64px; padding: 6px 8px; }
 }
 
 /* ===== CARDS CONTAINER ===== */
@@ -485,24 +566,20 @@ body {
     font-weight: 500;
 }
 
-/* ===== FILE MODAL ===== */
+/* ========== FULL-SCREEN PDF MODAL ========== */
+
+/* Modal Backdrop */
 .modal {
     display: none;
     position: fixed;
-    z-index: 1000;
-    left: 0;
     top: 0;
+    left: 0;
+    z-index: 1000;
     width: 100%;
     height: 100%;
-    background: rgba(0, 0, 0, 0.6);
+    background: rgba(0, 0, 0, 0.7);
     animation: fadeIn 0.3s ease;
-    padding: 0;
-    margin: 0;
-}
-
-@keyframes fadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
+    overflow: hidden;
 }
 
 .modal.show {
@@ -511,25 +588,32 @@ body {
     justify-content: stretch;
 }
 
+/* Fade Animation */
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+/* Modal Content: Full Screen */
 .modal-content {
-    background: white;
+    position: relative;
     width: 100%;
     height: 100%;
-    overflow: hidden;
-    position: relative;
-    box-shadow: none;
-    animation: slideUp 0.3s ease;
+    background: white;
     display: flex;
     flex-direction: column;
-    border-radius: 0;
     margin: 0;
     padding: 0;
+    border-radius: 0;
+    box-shadow: none;
+    overflow: hidden;
+    animation: slideUp 0.3s ease;
 }
 
 @keyframes slideUp {
     from {
         opacity: 0;
-        transform: translateY(30px);
+        transform: translateY(20px);
     }
     to {
         opacity: 1;
@@ -537,116 +621,269 @@ body {
     }
 }
 
+/* Modal Header: Fixed at Top */
 .modal-header {
+    position: relative;
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    padding: 1.5rem;
-    border-bottom: 1px solid #eee;
+    justify-content: space-between;
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     color: white;
+    padding: 1rem 1.5rem;
+    border: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.2);
     flex-shrink: 0;
     min-height: 60px;
+    gap: 1rem;
 }
 
 .modal-header h3 {
     margin: 0;
-    font-size: 1.2rem;
-    color: white;
+    font-size: 1.1rem;
     font-weight: 600;
+    color: white;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    flex-grow: 1;
 }
 
+/* Modal Actions */
 .modal-actions {
     display: flex;
-    gap: 8px;
+    gap: 0.75rem;
     align-items: center;
+    flex-shrink: 0;
 }
 
+/* Download Button */
 .modal-download-btn {
     background: #28a745;
     color: white;
     border: none;
-    padding: 8px 14px;
+    padding: 0.5rem 1rem;
     border-radius: 6px;
-    cursor: pointer;
-    font-size: 13px;
+    font-size: 0.9rem;
     font-weight: 600;
-    transition: all 0.3s ease;
+    cursor: pointer;
     text-decoration: none;
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    flex-shrink: 0;
+    gap: 0.5rem;
+    transition: all 0.3s ease;
+    white-space: nowrap;
 }
 
 .modal-download-btn:hover {
     background: #218838;
     transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(40, 167, 69, 0.3);
+    box-shadow: 0 4px 12px rgba(40, 167, 69, 0.4);
 }
 
+.modal-download-btn:active {
+    transform: translateY(0);
+}
+
+/* Close Button */
 .modal-close {
     background: rgba(255, 255, 255, 0.2);
     border: none;
+    color: white;
     width: 36px;
     height: 36px;
     border-radius: 6px;
-    font-size: 20px;
+    font-size: 1.25rem;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
     transition: all 0.3s ease;
-    color: white;
+    padding: 0;
     flex-shrink: 0;
 }
 
 .modal-close:hover {
     background: rgba(255, 255, 255, 0.3);
-    color: white;
+    transform: rotate(90deg);
 }
 
-#fileViewerContainer {
+/* File Viewer Container: Fills remaining space */
+.file-viewer-container {
+    flex: 1;
     width: 100%;
     height: 100%;
-    flex-grow: 1;
+    overflow: auto;
+    background: white;
     display: flex;
     align-items: center;
     justify-content: center;
-    overflow: auto;
-    padding: 0;
     margin: 0;
-    background: white;
+    padding: 0;
+    position: relative;
 }
 
-#fileViewerContainer img {
-    max-width: 100%;
-    max-height: 100%;
-    object-fit: contain;
-    border-radius: 0;
-}
-
-#fileViewerContainer iframe {
+/* PDF/Document iframe - Full size */
+.file-viewer-container iframe {
     width: 100%;
     height: 100%;
     border: none;
-    border-radius: 0;
     margin: 0;
     padding: 0;
+    display: block;
 }
 
-#fileViewerContainer p {
+/* Images - Centered and Responsive */
+.file-viewer-container img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    margin: auto;
+    display: block;
+    border-radius: 0;
+}
+
+/* Text/Other content */
+.file-viewer-container p,
+.file-viewer-container div {
+    margin: 0;
+    padding: 2rem;
+    text-align: center;
     color: #666;
-    font-size: 14px;
-    line-height: 1.6;
-    word-break: break-word;
-    padding: 20px;
+    font-size: 0.95rem;
 }
 
-/* ===== RESPONSIVE ===== */
+/* ========== RESPONSIVE DESIGN ========== */
+
+/* Laptop/Desktop - 1024px and above */
+@media (min-width: 1024px) {
+    .modal.show {
+        display: flex;
+        align-items: stretch;
+        justify-content: center;
+    }
+
+    .modal-content {
+        width: 98%;
+        height: 96vh;
+        max-width: 1400px;
+        border-radius: 0;
+    }
+
+    .modal-header {
+        padding: 1.2rem 1.5rem;
+        min-height: 60px;
+    }
+
+    .file-viewer-container {
+        height: calc(100% - 60px);
+        overflow: auto;
+    }
+
+    .modal-download-btn {
+        padding: 0.5rem 1rem;
+        font-size: 0.9rem;
+    }
+}
+
+/* Tablet - 768px to 1023px */
+@media (min-width: 768px) and (max-width: 1023px) {
+    .modal-content {
+        width: 95%;
+        height: 90vh;
+        margin: auto;
+    }
+
+    .modal-header {
+        padding: 1rem 1.2rem;
+        min-height: 58px;
+    }
+
+    .file-viewer-container {
+        height: calc(100% - 58px);
+        overflow: auto;
+    }
+
+    .modal-download-btn {
+        padding: 0.45rem 0.9rem;
+        font-size: 0.85rem;
+    }
+
+    .modal-close {
+        width: 34px;
+        height: 34px;
+        font-size: 1.1rem;
+    }
+}
+
+/* Mobile/Small screens - Below 768px */
+@media (max-width: 767px) {
+    .modal-content {
+        width: 100%;
+        height: 100%;
+        border-radius: 0;
+    }
+
+    .modal.show {
+        display: flex;
+        align-items: stretch;
+        justify-content: stretch;
+    }
+
+    .modal-header {
+        padding: 0.75rem 1rem;
+        min-height: 50px;
+        gap: 0.5rem;
+    }
+
+    .modal-header h3 {
+        font-size: 1rem;
+    }
+
+    .modal-download-btn {
+        padding: 0.4rem 0.8rem;
+        font-size: 0.85rem;
+    }
+
+    .modal-close {
+        width: 32px;
+        height: 32px;
+        font-size: 1.1rem;
+    }
+
+    .file-viewer-container {
+        height: calc(100% - 50px);
+        overflow: auto;
+    }
+
+    .file-viewer-container p,
+    .file-viewer-container div {
+        padding: 1rem;
+    }
+}
+
+/* Extra large screens - 1400px and above */
+@media (min-width: 1400px) {
+    .modal.show {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .modal-content {
+        width: 96%;
+        height: 92vh;
+        max-width: 1600px;
+        border-radius: 8px;
+        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+        overflow: hidden;
+    }
+
+    .file-viewer-container {
+        height: calc(100% - 60px);
+    }
+}
+
+/* ===== LEGACY RESPONSIVE ===== */
 @media (max-width: 768px) {
     .navbar-container {
         padding: 12px 16px;

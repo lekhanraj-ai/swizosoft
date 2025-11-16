@@ -138,7 +138,8 @@
         }
 
         .table-responsive {
-            overflow-x: auto;
+            /* Avoid internal horizontal scrollbar; allow wrapping */
+            overflow-x: visible;
         }
 
         table {
@@ -157,7 +158,8 @@
             font-weight: 600;
             color: #333;
             font-size: 0.9rem;
-            white-space: nowrap;
+            /* Allow header text to wrap on smaller widths */
+            white-space: normal;
         }
 
         tbody tr {

@@ -6,7 +6,7 @@
 
 body {
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: #ffffff; /* page background set to white per request */
     min-height: 100vh;
     display: flex;
     justify-content: center;
@@ -20,11 +20,12 @@ body {
 }
 
 .login-box {
-    background: white;
+    background: #ffffff;
     border-radius: 10px;
-    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.08);
     padding: 40px;
     animation: slideIn 0.5s ease-out;
+    border: 1px solid rgba(0,0,0,0.04);
 }
 
 @keyframes slideIn {

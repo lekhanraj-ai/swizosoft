@@ -61,9 +61,10 @@ Swizosoft Pvt. Ltd."""
                 if rows:
                     details_html = f"<h4>Application details</h4><table>{rows}</table>"
 
-            # Build plain-text message
+            # Build plain-text message with clear instruction for slot booking
             body_lines = [f"Hi {recipient_name},", "",
-                          "Congratulations! You have been selected for the internship at Swizosoft.", ""]
+                          "Congratulations! You have been selected for the internship at Swizosoft.", "",
+                          "Please book your interview slot using the link below at your earliest convenience. Slots are limited, so we recommend booking within 48 hours.", ""]
 
             if details_lines:
                 body_lines.append("Here are the details we have on file for you:")
@@ -72,17 +73,19 @@ Swizosoft Pvt. Ltd."""
 
             # Schedule link placed after details/message (so it appears below the details)
             if interview_link:
-                body_lines.append(f"Please schedule your interview using the following link:")
+                body_lines.append(f"Book your interview slot here:")
                 body_lines.append(interview_link)
                 body_lines.append("")
 
-            body_lines.append("We will contact you with any further instructions.\n")
+            body_lines.append("If you have any questions, reply to this email and our team will assist you.")
+            body_lines.append("")
             body_lines.append("Best regards,\nSwizosoft Team")
             body = "\n".join(body_lines)
 
-            # Build HTML message
+            # Build HTML message with a prominent booking button
             html_parts = [f"<p>Hi {recipient_name},</p>",
-                          "<p>Congratulations! You have been <strong>selected</strong> for the internship at <strong>Swizosoft</strong>.</p>"]
+                          "<p>Congratulations! You have been <strong>selected</strong> for the internship at <strong>Swizosoft</strong>.</p>",
+                          "<p>Please <strong>book your interview slot</strong> using the link below at your earliest convenience. Slots are limited, so we recommend booking within 48 hours.</p>"]
 
             if details_html:
                 html_parts.append(details_html)
@@ -90,10 +93,10 @@ Swizosoft Pvt. Ltd."""
             # Place schedule button/link below the details
             if interview_link:
                 html_parts.append(
-                    f"<p><a href=\"{interview_link}\" style=\"background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; display: inline-block;\">Schedule Your Interview</a></p>"
+                    f"<p><a href=\"{interview_link}\" style=\"background-color: #007bff; color: white; padding: 12px 22px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight:600;\">Book Interview Slot</a></p>"
                 )
 
-            html_parts.append("<p>We will contact you with any further instructions.</p>")
+            html_parts.append("<p>If you have any questions, reply to this email and our team will assist you.</p>")
             html_parts.append("<p>Best regards,<br/>Swizosoft Team</p>")
             html = "".join(html_parts)
 
