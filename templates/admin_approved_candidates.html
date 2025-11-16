@@ -4,15 +4,56 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Approved Candidates - Swizosoft</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; color: #333; }
+        .navbar { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 1rem 0; position: sticky; top: 0; z-index: 100; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        .navbar-container { max-width: 1600px; margin: 0 auto; padding: 0 2rem; display: flex; justify-content: space-between; align-items: center; gap: 1rem; width: 100%; }
+        .navbar-brand { display: flex; align-items: center; gap: 1rem; color: white; font-size: 1.5rem; font-weight: 700; flex-shrink: 0; }
+        .navbar-menu { display: flex; gap: 1.5rem; align-items: center; margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
+        .nav-link { color: rgba(255,255,255,0.8); text-decoration: none; padding: 0.5rem 1rem; border-radius: 4px; transition: all 0.3s; white-space: nowrap; }
+        .nav-link:hover { color: white; background: rgba(255,255,255,0.1); }
+        .nav-link.active { color: white; background: rgba(255,255,255,0.2); }
+        .logout-link { background: rgba(255,255,255,0.2); padding: 0.5rem 1rem; }
+        .container { max-width: 1600px; margin: 0 auto; padding: 2rem; }
+        .page-header { margin-bottom: 2rem; }
+        .page-header h2 { font-size: 2rem; margin-bottom: 0.5rem; }
+        .page-header p { color: #666; }
+        .section-header { margin-bottom: 1.5rem; }
+        .section-header h3 { font-size: 1.3rem; margin-bottom: 0.5rem; }
+        .count-badge { background: #667eea; color: white; padding: 0.25rem 0.75rem; border-radius: 20px; font-size: 0.85rem; font-weight: 600; }
+        .empty-state { text-align: center; padding: 3rem 2rem; color: #999; }
+        .empty-state-icon { font-size: 3rem; margin-bottom: 1rem; opacity: 0.5; }
+        .candidates-table { width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+        .candidates-table th, .candidates-table td { padding: 0.9rem; border-bottom: 1px solid #eee; text-align: left; font-size: 0.95rem; }
+        .candidates-table thead th { background: #f8f9fa; font-weight: 700; color: #333; }
+        .candidates-table tbody tr:hover { background: #f9fafb; }
+        .file-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+        .file-btn { background: #667eea; color: white; border: none; padding: 0.4rem 0.7rem; border-radius: 4px; font-size: 0.8rem; cursor: pointer; transition: background 0.3s; white-space: nowrap; }
+        .file-btn:hover { background: #764ba2; }
+        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); }
+        .modal.show { display: flex; align-items: center; justify-content: center; }
+        .modal-content { background: white; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); max-width: 90%; max-height: 90vh; overflow: auto; }
+        .modal-header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 1.5rem; display: flex; justify-content: space-between; align-items: center; }
+        .modal-header h3 { margin: 0; }
+        .modal-close { background: rgba(255,255,255,0.2); border: none; color: white; font-size: 1.5rem; cursor: pointer; padding: 0; width: 40px; height: 40px; border-radius: 4px; transition: background 0.3s; }
+        .modal-close:hover { background: rgba(255,255,255,0.3); }
+        .modal-body { padding: 2rem; }
+        .file-preview-img { max-width: 100%; max-height: 500px; border-radius: 4px; }
+        .file-preview-text { background: #f5f5f5; padding: 1rem; border-radius: 4px; font-family: monospace; white-space: pre-wrap; word-break: break-word; max-height: 500px; overflow-y: auto; }
+        @media (max-width: 768px) {
+            .navbar-menu { gap: 1rem; }
+            .nav-link { padding: 0.4rem 0.6rem; font-size: 0.85rem; }
+            .container { padding: 1rem; }
+            .candidates-table th, .candidates-table td { padding: 0.5rem; font-size: 0.85rem; }
+            .file-btn { padding: 0.3rem 0.6rem; font-size: 0.7rem; }
+        }
+    </style>
 </head>
 <body>
     <nav class="navbar">
         <div class="navbar-container">
-            <div class="navbar-brand">
-                <div class="logo-icon">🎓</div>
-                <h1>Swizosoft</h1>
-            </div>
+            <div class="navbar-brand">🎓 Swizosoft</div>
             <div class="navbar-menu">
                 <a href="{{ url_for('admin_dashboard') }}" class="nav-link">Dashboard</a>
                 <a href="{{ url_for('admin_selected') }}" class="nav-link">Selected Candidates</a>
@@ -23,61 +64,146 @@
         </div>
     </nav>
 
-    <div class="dashboard-container full-width">
+    <div class="container">
         <div class="page-header">
             <h2>Approved Candidates</h2>
-            <p>List of candidates approved for free internship</p>
+            <p>List of all approved candidates with their complete information and documents</p>
         </div>
 
-        <!-- Approved Candidates Section -->
-        <section class="internship-section">
-            <div class="section-header">
-                <div>
-                    <h3>Free Internship Approved Candidates</h3>
-                    <p>Total approved: <span class="count-badge" id="approved-count">0</span></p>
-                </div>
+        <div class="section-header">
+            <h3>Free Internship Approved Candidates <span class="count-badge" id="approved-count">0</span></h3>
+        </div>
+
+        <div id="approvedCandidatesContainer">
+            <div class="empty-state">
+                <div class="empty-state-icon">📋</div>
+                <p>Loading approved candidates...</p>
             </div>
-            <div class="table-container" id="approvedGrid">
-                <div class="loading-card">
-                    <div class="spinner"></div>
-                    <p>Loading approved candidates...</p>
-                </div>
-            </div>
-        </section>
+        </div>
     </div>
 
-    <!-- File Viewer Modal -->
     <div id="fileModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
                 <h3 id="fileTitle">File Viewer</h3>
-                <div class="modal-actions">
-                    <a id="downloadBtn" class="modal-download-btn" style="display:none;">⬇️ Download</a>
-                    <button class="modal-close" onclick="closeFileModal()">✕</button>
-                </div>
+                <button class="modal-close" onclick="closeFileModal()">✕</button>
             </div>
-            <div id="fileViewerContainer">
-                <!-- File content will be loaded here -->
+            <div class="modal-body">
+                <div id="fileViewerContainer"></div>
             </div>
         </div>
     </div>
 
-    <!-- Rejection Modal -->
-    <div id="approvedRejectionModal" class="rejection-modal">
-        <div class="rejection-modal-content">
-            <div class="rejection-modal-header">
-                <h3>Select Rejection Reason</h3>
-                <span class="rejection-modal-close" onclick="closeApprovedRejectionModal()">&times;</span>
-            </div>
-            <div id="approvedRejectionReasonsList" class="rejection-reasons-list">
-                <p>Loading reasons...</p>
-            </div>
-            <div class="rejection-modal-footer">
-                <button onclick="closeApprovedRejectionModal()" class="file-btn">Cancel</button>
-            </div>
-        </div>
-    </div>
-
-    <script src="{{ url_for('static', filename='js/admin_approved_candidates.js') }}"></script>
+    <script>
+        function escapeHtml(t) { return String(t || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c])); }
+        
+        function formatDate(d) {
+            if (!d) return '-';
+            try { return String(new Date(d).toLocaleDateString('en-IN', {year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})); }
+            catch { return String(d); }
+        }
+        
+        function viewFile(fname, b64, type) {
+            const m = document.getElementById('fileModal');
+            const c = document.getElementById('fileViewerContainer');
+            document.getElementById('fileTitle').textContent = 'View: ' + escapeHtml(fname);
+            try {
+                const ext = fname.split('.').pop().toLowerCase();
+                if (['jpg','jpeg','png','gif','bmp','webp'].includes(ext)) {
+                    c.innerHTML = `<img src="data:image/;base64,${b64}" class="file-preview-img" alt="${escapeHtml(fname)}" style="max-width:100%;border-radius:8px;">`;
+                } else if (ext === 'pdf') {
+                    c.innerHTML = `<iframe src="data:application/pdf;base64,${b64}" style="width:100%;height:80vh;border:none;border-radius:8px;"></iframe>`;
+                } else {
+                    try {
+                        const t = new TextDecoder('utf-8').decode(new Uint8Array(atob(b64).split('').map(x => x.charCodeAt(0))));
+                        c.innerHTML = `<pre class="file-preview-text">${escapeHtml(t.substring(0,10000))}</pre>`;
+                    } catch { c.innerHTML = '<div class="file-preview-text">Binary file - cannot preview</div>'; }
+                }
+            } catch (e) { c.innerHTML = `<div class="file-preview-text">Error: ${escapeHtml(e.message)}</div>`; }
+            m.classList.add('show');
+        }
+        
+        function downloadFile(fname, b64) {
+            try {
+                const l = document.createElement('a');
+                l.href = `data:application/octet-stream;base64,${b64}`;
+                l.download = fname;
+                document.body.appendChild(l);
+                l.click();
+                document.body.removeChild(l);
+            } catch (e) { alert('Error: ' + e.message); }
+        }
+        
+        function closeFileModal() { document.getElementById('fileModal').classList.remove('show'); }
+        
+        window.onclick = (e) => { if (e.target === document.getElementById('fileModal')) closeFileModal(); };
+        
+        async function loadApprovedCandidates() {
+            console.log('📡 Starting load...');
+            try {
+                const r = await fetch('/admin/api/get-approved-candidates');
+                console.log('✅ Fetch response:', r.status);
+                const ct = (r.headers.get('content-type') || '').toLowerCase();
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                if (!ct.includes('application/json')) throw new Error('Non-JSON response');
+                const data = await r.json();
+                console.log('✅ Data received:', data.data?.length, 'rows');
+                const cnt = document.getElementById('approvedCandidatesContainer');
+                
+                if (data.success && data.data && data.data.length > 0) {
+                    console.log('📊 Building table...');
+                    let html = '<table class="candidates-table"><thead><tr><th>Name</th><th>USN</th><th>Email</th><th>Phone</th><th>Year</th><th>Qualification</th><th>Branch</th><th>College</th><th>Domain</th><th>Mode</th><th>App ID</th><th>User ID</th><th>Created</th><th>Updated</th><th>Files</th></tr></thead><tbody>';
+                    data.data.forEach((c, idx) => {
+                        html += `<tr><td>${escapeHtml(c.name||'-')}</td><td>${escapeHtml(c.usn||'-')}</td><td>${escapeHtml(c.email||'-')}</td><td>${escapeHtml(c.phone_number||'-')}</td><td>${escapeHtml(c.year||'-')}</td><td>${escapeHtml(c.qualification||'-')}</td><td>${escapeHtml(c.branch||'-')}</td><td>${escapeHtml(c.college||'-')}</td><td>${escapeHtml(c.domain||'-')}</td><td>${escapeHtml(c.mode_of_interview||'-')}</td><td>${escapeHtml(c.application_id||'-')}</td><td>${escapeHtml(c.user_id||'-')}</td><td>${escapeHtml(formatDate(c.created_at))}</td><td>${escapeHtml(formatDate(c.updated_at))}</td><td style="min-width:120px"><div class="file-actions" id="files_${idx}">`;
+                        html += '</div></td></tr>';
+                    });
+                    html += '</tbody></table>';
+                    cnt.innerHTML = html;
+                    console.log('✅ Table HTML inserted');
+                    
+                    // Attach file buttons using event listeners (avoid base64 in onclick)
+                    data.data.forEach((c, idx) => {
+                        const fileDiv = document.getElementById(`files_${idx}`);
+                        if (!fileDiv) return;
+                        
+                        if (c.resume_content) {
+                            const vBtn = document.createElement('button');
+                            vBtn.className = 'file-btn';
+                            vBtn.textContent = 'View Resume';
+                            vBtn.onclick = () => viewFile(c.resume_name||'Resume', c.resume_content, 'r');
+                            fileDiv.appendChild(vBtn);
+                        }
+                        if (c.project_document_content) {
+                            const vBtn = document.createElement('button');
+                            vBtn.className = 'file-btn';
+                            vBtn.textContent = 'View Project';
+                            vBtn.onclick = () => viewFile(c.project_document_name||'Project', c.project_document_content, 'p');
+                            fileDiv.appendChild(vBtn);
+                        }
+                        if (c.id_proof_content) {
+                            const vBtn = document.createElement('button');
+                            vBtn.className = 'file-btn';
+                            vBtn.textContent = 'View ID';
+                            vBtn.onclick = () => viewFile(c.id_proof_name||'ID', c.id_proof_content, 'i');
+                            fileDiv.appendChild(vBtn);
+                        }
+                    });
+                    
+                    document.getElementById('approved-count').textContent = data.data.length;
+                    console.log('✅ Table rendered with', data.data.length, 'rows');
+                } else {
+                    console.log('⚠️ No data or empty array');
+                    cnt.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📭</div><p>No approved candidates yet</p></div>';
+                    document.getElementById('approved-count').textContent = '0';
+                }
+            } catch (e) {
+                console.error('❌ Error:', e);
+                document.getElementById('approvedCandidatesContainer').innerHTML = `<div class="empty-state"><div class="empty-state-icon">⚠️</div><p>Error: ${escapeHtml(e.message)}</p></div>`;
+            }
+        }
+        
+        document.addEventListener('DOMContentLoaded', loadApprovedCandidates);
+        setInterval(loadApprovedCandidates, 30000);
+    </script>
 </body>
 </html>

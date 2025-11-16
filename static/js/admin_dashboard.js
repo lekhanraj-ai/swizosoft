@@ -154,7 +154,13 @@ function updateStatus(internshipId, status, internshipType) {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            alert(data.message || `Application ${status.toLowerCase()}!`);
+            // If server returned selected_inserted flag (for paid type), surface it
+            if (data.hasOwnProperty('selected_inserted') && data.selected_inserted === false) {
+                const err = data.selected_insert_error || 'Candidate not inserted into Selected (possible duplicate USN)';
+                alert((data.message || `Application ${status.toLowerCase()}!`) + '\nNote: ' + err);
+            } else {
+                alert(data.message || `Application ${status.toLowerCase()}!`);
+            }
             // Refresh the table
             loadInternships(currentType);
         } else {

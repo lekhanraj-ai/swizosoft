@@ -15,6 +15,7 @@ class ApprovedCandidate(db.Model):
     
     # Basic information
     application_id = db.Column(db.String(20), unique=True, nullable=False, index=True)
+    user_id = db.Column(db.Integer, unique=True, nullable=True, index=True)
     name = db.Column(db.String(100), nullable=False)
     email = db.Column(db.String(100), nullable=False)
     phone_number = db.Column(db.String(15), nullable=False)
@@ -54,6 +55,7 @@ class ApprovedCandidate(db.Model):
         return {
             'usn': self.usn,
             'application_id': self.application_id,
+            'user_id': self.user_id,
             'name': self.name,
             'email': self.email,
             'phone_number': self.phone_number,

@@ -272,17 +272,23 @@ def admin_api_get_approved_candidates():
     """Fetch all approved candidates from approved_candidates table using SQLAlchemy ORM"""
     max_retries = 3
     retry_count = 0
-    
+
+    import traceback
+
+    # If the admin session is not present, return JSON 401 instead of redirecting (helps AJAX callers)
+    if not session.get('admin_logged_in'):
+        return jsonify({'success': False, 'error': 'Not authenticated'}), 401
+
     while retry_count < max_retries:
         try:
             # Query all approved candidates ordered by created_at descending
             approved_candidates = ApprovedCandidate.query.order_by(ApprovedCandidate.created_at.desc()).all()
-            
+
             # Convert to list of dictionaries
             processed_rows = []
             for candidate in approved_candidates:
                 candidate_dict = candidate.to_dict()
-                
+
                 # Convert BLOB fields to base64 for JSON serialization
                 if candidate_dict.get('resume_content') and isinstance(candidate_dict['resume_content'], bytes):
                     candidate_dict['resume_content'] = base64.b64encode(candidate_dict['resume_content']).decode('utf-8')
@@ -290,15 +296,19 @@ def admin_api_get_approved_candidates():
                     candidate_dict['project_document_content'] = base64.b64encode(candidate_dict['project_document_content']).decode('utf-8')
                 if candidate_dict.get('id_proof_content') and isinstance(candidate_dict['id_proof_content'], bytes):
                     candidate_dict['id_proof_content'] = base64.b64encode(candidate_dict['id_proof_content']).decode('utf-8')
-                
+
                 processed_rows.append(candidate_dict)
-            
-            print(f"✓ Fetched {len(processed_rows)} approved candidates")
+
+            # Debug info: print IDs returned
+            ids = [c.get('usn') for c in processed_rows]
+            print(f"✓ Fetched {len(processed_rows)} approved candidates; USNs: {ids[:10]}")
             return jsonify({'success': True, 'data': processed_rows})
         except Exception as e:
             retry_count += 1
-            print(f"✗ Exception in /admin/api/get-approved-candidates (attempt {retry_count}/{max_retries}): {str(e)[:100]}")
-            
+            tb = traceback.format_exc()
+            print(f"✗ Exception in /admin/api/get-approved-candidates (attempt {retry_count}/{max_retries}): {str(e)[:200]}")
+            print(tb)
+
             if retry_count < max_retries:
                 # Try to reset the connection and retry
                 try:
@@ -307,8 +317,8 @@ def admin_api_get_approved_candidates():
                 except Exception:
                     pass
             else:
-                # All retries exhausted
-                return jsonify({'success': False, 'error': 'Database connection error. Please refresh the page.'}), 500
+                # All retries exhausted — return the exception message to the client (for debugging)
+                return jsonify({'success': False, 'error': 'Database error', 'exception': str(e)}), 500
 
 
 @app.route('/admin/api/get-approved-file/<usn>', methods=['GET'])
@@ -753,6 +763,10 @@ def admin_accept(user_id):
     except Exception:
         pass
 
+    # Track whether we inserted into Selected (for paid internships)
+    selected_inserted = None
+    selected_insert_error = None
+
     # If this is a paid internship, store the full applicant details in the Selected table
     if internship_type == 'paid':
         try:
@@ -789,6 +803,7 @@ def admin_accept(user_id):
                 domain_val = row_map.get('domain') or ''
                 project_description_val = row_map.get('project_description') or ''
                 project_name_val = row_map.get('project_document') or row_map.get('project_name') or ''
+                internship_duration_val = row_map.get('internship_duration') or '1 month'
                 
                 # Fetch document BLOBs
                 project_blob = None
@@ -806,50 +821,98 @@ def admin_accept(user_id):
                 except Exception:
                     pass
                 
-                # Insert into Selected table
+                # Insert into Selected table (USN is treated as primary key; avoid duplicates)
                 try:
-                    # Check if applicant already exists in Selected
-                    cursor.execute("SELECT id FROM Selected WHERE application_id = %s LIMIT 1", (application_id,))
-                    existing = cursor.fetchone()
-                    
-                    if existing:
-                        app.logger.warning(f"Paid applicant {user_id} ({name_val}) already exists in Selected table (ID: {existing['id']})")
+                    inserted = False
+
+                    if not usn_val:
+                        app.logger.error(f"Cannot insert paid applicant {user_id} ({name_val}) into Selected: missing USN")
                     else:
-                        insert_sql = """INSERT INTO Selected 
-                        (application_id, name, email, phone, usn, year, qualification, branch, college, domain, 
-                         project_description, internship_project_name, internship_project_content, project_title)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
-                        
-                        cursor.execute(insert_sql, (
-                            application_id, name_val, email_val, phone_val, usn_val, year_val,
-                            qualification_val, branch_val, college_val, domain_val,
-                            project_description_val, project_name_val, project_blob, project_name_val
-                        ))
-                        conn.commit()
-                        app.logger.info(f"Successfully inserted paid applicant {user_id} ({name_val}) into Selected")
-                    
-                    # Now delete original records
-                    try:
-                        cursor.execute("DELETE FROM paid_document_store WHERE paid_internship_application_id = %s", (user_id,))
-                        conn.commit()
-                    except Exception as e:
-                        app.logger.warning(f"Could not delete documents: {e}")
-                    
-                    try:
-                        cursor.execute(f"DELETE FROM {paid_table} WHERE id = %s", (user_id,))
-                        conn.commit()
-                        app.logger.info(f"Deleted original paid application for {user_id}")
-                    except Exception:
-                        alt_table = paid_table.replace('_application', '') if paid_table.endswith('_application') else paid_table + '_application'
+                        # Check if USN already exists in Selected (USN is primary key)
+                        cursor.execute("SELECT usn FROM Selected WHERE usn = %s LIMIT 1", (usn_val,))
+                        exists = cursor.fetchone()
+
+                        if exists:
+                            # USN already exists: update the existing Selected record (upsert behavior)
+                            try:
+                                update_sql = """UPDATE Selected SET
+                                    application_id = %s,
+                                    name = %s,
+                                    email = %s,
+                                    phone = %s,
+                                    year = %s,
+                                    qualification = %s,
+                                    branch = %s,
+                                    college = %s,
+                                    domain = %s,
+                                    project_description = %s,
+                                    internship_project_name = %s,
+                                    internship_project_content = %s,
+                                    project_title = %s,
+                                    internship_duration = %s,
+                                    approved_date = CURDATE(),
+                                    status = 'ongoing',
+                                    completion_date = CURDATE()
+                                    WHERE usn = %s"""
+
+                                cursor.execute(update_sql, (
+                                    application_id, name_val, email_val, phone_val,
+                                    year_val, qualification_val, branch_val, college_val, domain_val,
+                                    project_description_val, project_name_val, project_blob, project_name_val,
+                                    internship_duration_val, usn_val
+                                ))
+                                conn.commit()
+                                inserted = True
+                                app.logger.info(f"Updated existing Selected record for USN {usn_val} (applicant {user_id} - {name_val})")
+                            except Exception as e:
+                                app.logger.error(f"Failed to update existing Selected record for USN {usn_val}: {e}")
+                                # fall through with inserted False
+                        else:
+                            insert_sql = """INSERT INTO Selected 
+                            (application_id, name, email, phone, usn, year, qualification, branch, college, domain, 
+                             project_description, internship_project_name, internship_project_content, project_title, internship_duration)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
+
+                            cursor.execute(insert_sql, (
+                                application_id, name_val, email_val, phone_val, usn_val, year_val,
+                                qualification_val, branch_val, college_val, domain_val,
+                                project_description_val, project_name_val, project_blob, project_name_val,
+                                internship_duration_val
+                            ))
+                            conn.commit()
+                            inserted = True
+                            app.logger.info(f"Successfully inserted paid applicant {user_id} ({name_val}) into Selected (USN: {usn_val})")
+
+                    # Now delete original records ONLY if we inserted successfully
+                    if inserted:
                         try:
-                            cursor.execute(f"DELETE FROM {alt_table} WHERE id = %s", (user_id,))
+                            cursor.execute("DELETE FROM paid_document_store WHERE paid_internship_application_id = %s", (user_id,))
                             conn.commit()
                         except Exception as e:
-                            app.logger.warning(f"Could not delete from {alt_table}: {e}")
+                            app.logger.warning(f"Could not delete documents: {e}")
+
+                        try:
+                            cursor.execute(f"DELETE FROM {paid_table} WHERE id = %s", (user_id,))
+                            conn.commit()
+                            app.logger.info(f"Deleted original paid application for {user_id}")
+                        except Exception:
+                            alt_table = paid_table.replace('_application', '') if paid_table.endswith('_application') else paid_table + '_application'
+                            try:
+                                cursor.execute(f"DELETE FROM {alt_table} WHERE id = %s", (user_id,))
+                                conn.commit()
+                            except Exception as e:
+                                app.logger.warning(f"Could not delete from {alt_table}: {e}")
                             
                 except Exception as e:
                     app.logger.error(f"Error inserting/deleting paid applicant {user_id}: {e}")
-                    conn.rollback()
+                    selected_insert_error = str(e)
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
+                finally:
+                    # reflect insertion outcome
+                    selected_inserted = bool(inserted)
             else:
                 app.logger.error(f"Could not find paid applicant {user_id}")
             
@@ -927,6 +990,7 @@ def admin_accept(user_id):
             conn.close()
             
             # Create and insert ApprovedCandidate record using SQLAlchemy
+            approved_inserted = False
             if row:
                 try:
                     # Map source columns to ApprovedCandidate fields
@@ -944,10 +1008,14 @@ def admin_accept(user_id):
                     if usn_val:
                         existing = ApprovedCandidate.query.filter_by(usn=usn_val).first()
                         if not existing:
+                            # Get application_id from the row
+                            app_id = get_field(['application_id'], str(user_id))
+                            
                             # Create new approved candidate
                             approved_candidate = ApprovedCandidate(
                                 usn=usn_val,
-                                application_id=user_id,
+                                application_id=app_id,
+                                user_id=user_id,
                                 name=get_field(['name', 'full_name', 'applicant_name'], ''),
                                 email=get_field(['email', 'applicant_email'], ''),
                                 phone_number=get_field(['phone', 'mobile', 'phone_number', 'contact'], ''),
@@ -967,6 +1035,9 @@ def admin_accept(user_id):
                             
                             db.session.add(approved_candidate)
                             db.session.commit()
+                            approved_inserted = True
+                            app.logger.info(f"Successfully inserted free applicant {user_id} ({usn_val}) into approved_candidates")
+                            
                             # Prepare details for email (use human-friendly keys)
                             details_for_email = {
                                 'application_id': row_map.get('application_id') or user_id,
@@ -981,6 +1052,35 @@ def admin_accept(user_id):
                                 'domain': row_map.get('domain') or '',
                                 'mode_of_interview': row_map.get('mode_of_interview') or row_map.get('interview_mode') or 'online'
                             }
+                            
+                            # Delete from free_internship_application and free_document_store only if insertion successful
+                            if approved_inserted:
+                                try:
+                                    # Delete from free_document_store
+                                    conn = get_db()
+                                    cursor = conn.cursor()
+                                    cursor.execute("DELETE FROM free_document_store WHERE free_internship_application_id = %s", (user_id,))
+                                    conn.commit()
+                                    app.logger.info(f"Deleted documents for free applicant {user_id}")
+                                except Exception as e:
+                                    app.logger.warning(f"Could not delete documents for free applicant {user_id}: {e}")
+                                
+                                try:
+                                    # Delete from free_internship_application
+                                    conn = get_db()
+                                    cursor = conn.cursor()
+                                    cursor.execute(f"DELETE FROM {free_table} WHERE id = %s", (user_id,))
+                                    conn.commit()
+                                    app.logger.info(f"Deleted free application for {user_id}")
+                                except Exception:
+                                    alt_table = free_table.replace('_application', '') if free_table.endswith('_application') else free_table + '_application'
+                                    try:
+                                        conn = get_db()
+                                        cursor = conn.cursor()
+                                        cursor.execute(f"DELETE FROM {alt_table} WHERE id = %s", (user_id,))
+                                        conn.commit()
+                                    except Exception as e:
+                                        app.logger.warning(f"Could not delete from {alt_table}: {e}")
                 except Exception as e:
                     app.logger.error(f"Error inserting approved candidate: {str(e)}")
                     try:
@@ -999,10 +1099,20 @@ def admin_accept(user_id):
         interview_link = 'http://127.0.0.1:5000/interview-scheduler'
 
     ok = send_accept_email(email, name or '', details=details_for_email, interview_link=interview_link, internship_type=internship_type)
+    resp = {'success': bool(ok)}
     if ok:
-        return jsonify({'success': True, 'message': 'Accept email sent'})
+        resp['message'] = 'Accept email sent'
     else:
-        return jsonify({'success': False, 'error': 'Failed to send email'}), 500
+        resp['error'] = 'Failed to send email'
+
+    # Include Selected insertion result when processing paid internships
+    if internship_type == 'paid':
+        resp['selected_inserted'] = selected_inserted
+        if selected_insert_error:
+            resp['selected_insert_error'] = selected_insert_error
+
+    status_code = 200 if ok else 500
+    return jsonify(resp), status_code
 
 @app.route('/reject/<int:user_id>', methods=['POST'])
 @login_required
