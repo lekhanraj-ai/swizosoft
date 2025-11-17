@@ -1412,12 +1412,16 @@ def admin_accept(user_id):
             domain_val = row_map.get('domain') or ''
             mode_of_interview_val = row_map.get('mode_of_interview') or 'online'
             
+            # Extract or create application_id from free_internship table
+            # Use existing application_id if available, otherwise use user_id (which is the 'id' from free_internship table)
+            application_id_val = row_map.get('application_id') or str(user_id)
+            
             # Create and insert ApprovedCandidate record
             try:
                 approved_candidate = ApprovedCandidate(
                     usn=usn_val,
-                    application_id=str(user_id),
-                    user_id=user_id,
+                    application_id=application_id_val,
+                    user_id=user_id,  # This is the 'id' from free_internship table
                     name=name_val,
                     email=email_val,
                     phone_number=phone_val,
@@ -1539,6 +1543,22 @@ def admin_accept(user_id):
             project_description_val = row_map.get('project_description') or ''
             project_name_val = row_map.get('project_document') or row_map.get('project_name') or ''
             project_title_val = row_map.get('project_title') or project_name_val or ''
+            internship_duration = row_map.get('internship_duration') or '1'  # Default 1 month if not specified
+            
+            # Convert duration to integer (in months)
+            try:
+                duration_months = int(internship_duration)
+            except (ValueError, TypeError):
+                duration_months = 1
+            
+            # Generate unique candidate_id for paid internship based on domain
+            # Format: SIN25FD001 (SIN + year + domain_code + counter)
+            candidate_id_val = generate_candidate_id(domain_val, conn)
+            if not candidate_id_val:
+                cursor.close()
+                conn.close()
+                app.logger.error(f"Failed to generate candidate_id for paid applicant {user_id}")
+                return jsonify({'success': False, 'error': 'Failed to generate candidate ID'}), 500
             
             # Fetch document BLOBs
             project_blob = None
@@ -1556,22 +1576,22 @@ def admin_accept(user_id):
             except Exception as e:
                 app.logger.warning(f"Could not fetch project BLOB: {e}")
             
-            # Insert into Selected table
+            # Insert into Selected table (with generated candidate_id, approved_date set to today, completion_date calculated)
             try:
                 insert_sql = """INSERT INTO Selected 
-                (application_id, name, email, phone, usn, year, qualification, branch, college, domain, 
+                (candidate_id, name, email, phone, usn, year, qualification, branch, college, domain, 
                  project_description, internship_project_name, internship_project_content, project_title,
-                 approved_date, status, completion_date, resend_count)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
+                 approved_date, status, completion_date, resend_count, mode_of_internship)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURDATE(), %s, DATE_ADD(CURDATE(), INTERVAL %s MONTH), %s, %s)"""
                 
                 cursor.execute(insert_sql, (
-                    application_id, name_val, email_val, phone_val, usn_val, year_val,
+                    candidate_id_val, name_val, email_val, phone_val, usn_val, year_val,
                     qualification_val, branch_val, college_val, domain_val,
                     project_description_val, project_name_val, project_blob, project_title_val,
-                    None, 'ongoing', None, 0
+                    'ongoing', duration_months, 0, 'paid'
                 ))
                 conn.commit()
-                app.logger.info(f"✓ Successfully inserted paid applicant {user_id} ({usn_val}) into Selected")
+                app.logger.info(f"✓ Successfully inserted paid applicant {user_id} ({usn_val}) into Selected with candidate_id: {candidate_id_val} | Duration: {duration_months} months")
                 
                 # Delete from paid_internship_application and paid_document_store
                 try:
