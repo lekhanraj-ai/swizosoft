@@ -1484,15 +1484,21 @@ def admin_accept(user_id):
                     # Determine application_id and USN (fallbacks if missing)
                     app_id = get_field(['application_id'], str(user_id))
                     usn_val = get_field(['usn', 'roll', 'rollno']) or (f"APP{app_id}" if app_id else str(user_id))
+                    print(f"DEBUG: user_id={user_id}, app_id={app_id}, usn_val={usn_val}, row_map keys={list(row_map.keys())}", flush=True)
 
                     # Check if a record already exists by USN or application_id
                     existing = None
                     try:
                         if usn_val:
                             existing = ApprovedCandidate.query.filter_by(usn=usn_val).first()
+                            if existing:
+                                print(f"DEBUG: Found existing by usn={usn_val}", flush=True)
                         if not existing and app_id:
                             existing = ApprovedCandidate.query.filter_by(application_id=str(app_id)).first()
-                    except Exception:
+                            if existing:
+                                print(f"DEBUG: Found existing by app_id={app_id}", flush=True)
+                    except Exception as e:
+                        print(f"DEBUG: Error checking existing: {e}", flush=True)
                         existing = None
 
                     if not existing:
@@ -1522,9 +1528,12 @@ def admin_accept(user_id):
                             db.session.add(approved_candidate)
                             db.session.commit()
                             approved_inserted = True
-                            app.logger.info(f"Successfully inserted free applicant {user_id} ({usn_val}) into approved_candidates")
+                            app.logger.info(f"✓ Successfully inserted free applicant {user_id} ({usn_val}) into approved_candidates")
+                            print(f"✓ Successfully inserted free applicant {user_id} ({usn_val}) into approved_candidates", flush=True)
                         except Exception as e:
-                            app.logger.error(f"Failed to insert approved candidate for {user_id}: {e}")
+                            error_msg = f"Failed to insert approved candidate for {user_id}: {str(e)}"
+                            app.logger.error(error_msg)
+                            print(f"✗ {error_msg}", flush=True)
                             try:
                                 db.session.rollback()
                             except Exception:
@@ -1533,6 +1542,7 @@ def admin_accept(user_id):
                     else:
                         # Existing record found: update it with latest info
                         try:
+                            print(f"DEBUG: Updating existing record usn={usn_val} / app_id={app_id}", flush=True)
                             existing.name = get_field(['name', 'full_name', 'applicant_name'], existing.name or '')
                             existing.email = get_field(['email', 'applicant_email'], existing.email or '')
                             existing.phone_number = get_field(['phone', 'mobile', 'phone_number', 'contact'], existing.phone_number or '')
@@ -1557,58 +1567,68 @@ def admin_accept(user_id):
                                 existing.id_proof_content = id_proof_blob
                             db.session.commit()
                             approved_inserted = True
-                            app.logger.info(f"Updated existing approved candidate record for {usn_val} / app_id {app_id}")
+                            app.logger.info(f"✓ Updated existing approved candidate record for {usn_val} / app_id {app_id}")
+                            print(f"✓ Updated existing approved candidate record for {usn_val} / app_id {app_id}", flush=True)
                         except Exception as e:
-                            app.logger.error(f"Failed to update existing approved candidate: {e}")
+                            error_msg = f"Failed to update existing approved candidate: {str(e)}"
+                            app.logger.error(error_msg)
+                            print(f"✗ {error_msg}", flush=True)
                             try:
                                 db.session.rollback()
                             except Exception:
                                 pass
                             approved_inserted = False
-                            
-                            # Prepare details for email (use human-friendly keys)
-                            details_for_email = {
-                                'application_id': row_map.get('application_id') or user_id,
-                                'usn': usn_val,
-                                'name': row_map.get('name') or row_map.get('full_name') or '',
-                                'email': row_map.get('email') or '',
-                                'phone': row_map.get('phone') or row_map.get('mobile') or row_map.get('phone_number') or '',
-                                'year': row_map.get('year') or '',
-                                'qualification': row_map.get('qualification') or '',
-                                'branch': row_map.get('branch') or '',
-                                'college': row_map.get('college') or '',
-                                'domain': row_map.get('domain') or '',
-                                'mode_of_interview': row_map.get('mode_of_interview') or row_map.get('interview_mode') or 'online'
-                            }
-                            
-                            # Delete from free_internship_application and free_document_store only if insertion successful
-                            if approved_inserted:
-                                try:
-                                    # Delete from free_document_store
-                                    conn = get_db()
-                                    cursor = conn.cursor()
-                                    cursor.execute("DELETE FROM free_document_store WHERE free_internship_application_id = %s", (user_id,))
-                                    conn.commit()
-                                    app.logger.info(f"Deleted documents for free applicant {user_id}")
-                                except Exception as e:
-                                    app.logger.warning(f"Could not delete documents for free applicant {user_id}: {e}")
-                                
-                                try:
-                                    # Delete from free_internship_application
-                                    conn = get_db()
-                                    cursor = conn.cursor()
-                                    cursor.execute(f"DELETE FROM {free_table} WHERE id = %s", (user_id,))
-                                    conn.commit()
-                                    app.logger.info(f"Deleted free application for {user_id}")
-                                except Exception:
-                                    alt_table = free_table.replace('_application', '') if free_table.endswith('_application') else free_table + '_application'
-                                    try:
-                                        conn = get_db()
-                                        cursor = conn.cursor()
-                                        cursor.execute(f"DELETE FROM {alt_table} WHERE id = %s", (user_id,))
-                                        conn.commit()
-                                    except Exception as e:
-                                        app.logger.warning(f"Could not delete from {alt_table}: {e}")
+                    
+                    # Delete from free_internship_application and free_document_store only if insertion/update successful
+                    if approved_inserted:
+                        try:
+                            # Delete from free_document_store
+                            conn = get_db()
+                            cursor = conn.cursor()
+                            cursor.execute("DELETE FROM free_document_store WHERE free_internship_application_id = %s", (user_id,))
+                            conn.commit()
+                            app.logger.info(f"✓ Deleted documents for free applicant {user_id}")
+                            print(f"✓ Deleted documents for free applicant {user_id}", flush=True)
+                        except Exception as e:
+                            app.logger.warning(f"Could not delete documents for free applicant {user_id}: {e}")
+                            print(f"⚠ Could not delete documents: {e}", flush=True)
+                        
+                        try:
+                            # Delete from free_internship_application
+                            conn = get_db()
+                            cursor = conn.cursor()
+                            cursor.execute(f"DELETE FROM {free_table} WHERE id = %s", (user_id,))
+                            conn.commit()
+                            app.logger.info(f"✓ Deleted free application for {user_id}")
+                            print(f"✓ Deleted free application {user_id} from {free_table}", flush=True)
+                        except Exception as e:
+                            print(f"⚠ Could not delete from {free_table}: {e}. Trying alternate table...", flush=True)
+                            alt_table = free_table.replace('_application', '') if free_table.endswith('_application') else free_table + '_application'
+                            try:
+                                conn = get_db()
+                                cursor = conn.cursor()
+                                cursor.execute(f"DELETE FROM {alt_table} WHERE id = %s", (user_id,))
+                                conn.commit()
+                                app.logger.info(f"✓ Deleted free application for {user_id} from alternate table {alt_table}")
+                                print(f"✓ Deleted free application {user_id} from {alt_table}", flush=True)
+                            except Exception as e:
+                                app.logger.warning(f"Could not delete from {alt_table}: {e}")
+                                print(f"✗ Could not delete from {alt_table}: {e}", flush=True)
+                    
+                    # Prepare details for email (use human-friendly keys)
+                    details_for_email = {
+                        'application_id': row_map.get('application_id') or user_id,
+                        'usn': usn_val,
+                        'name': row_map.get('name') or row_map.get('full_name') or '',
+                        'email': row_map.get('email') or '',
+                        'phone': row_map.get('phone') or row_map.get('mobile') or row_map.get('phone_number') or '',
+                        'year': row_map.get('year') or '',
+                        'qualification': row_map.get('qualification') or '',
+                        'branch': row_map.get('branch') or '',
+                        'college': row_map.get('college') or '',
+                        'domain': row_map.get('domain') or '',
+                        'mode_of_interview': row_map.get('mode_of_interview') or row_map.get('interview_mode') or 'online'
+                    }
                 except Exception as e:
                     app.logger.error(f"Error inserting approved candidate: {str(e)}")
                     try:
@@ -1618,7 +1638,7 @@ def admin_accept(user_id):
         except Exception:
             pass
 
-    # If free internship, add interview scheduler link (but do not include report_link in email)
+    # If free internship, ensure DB transfer succeeded before sending email
     interview_link = None
     if internship_type == 'free':
         if details_for_email is None:
@@ -1626,10 +1646,21 @@ def admin_accept(user_id):
         # NOTE: intentionally do NOT add a `report_link` into `details_for_email` to avoid showing it in the email
         interview_link = 'http://127.0.0.1:5000/interview-scheduler'
 
+        # If DB insertion/update failed, return explicit error (do not just send email)
+        if not approved_inserted:
+            app.logger.error(f"Free internship accept failed for id={user_id}: approved_inserted={approved_inserted}")
+            return jsonify({'success': False, 'error': 'Failed to move application to approved_candidates'}), 500
+
+    # Send acceptance email (for both free and paid flows)
     ok = send_accept_email(email, name or '', details=details_for_email, interview_link=interview_link, internship_type=internship_type)
+
     resp = {'success': bool(ok)}
     if ok:
-        resp['message'] = 'Accept email sent'
+        # Include confirmation about DB move for free internships
+        if internship_type == 'free':
+            resp['message'] = 'Application moved to approved_candidates and accept email sent'
+        else:
+            resp['message'] = 'Accept email sent'
     else:
         resp['error'] = 'Failed to send email'
 
