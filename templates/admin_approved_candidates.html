@@ -48,6 +48,10 @@
             .candidates-table th, .candidates-table td { padding: 0.5rem; font-size: 0.85rem; }
             .file-btn { padding: 0.3rem 0.6rem; font-size: 0.7rem; }
         }
+
+        /* Full-bleed file viewer for large screens */
+        #fileModal .modal-content.full-bleed { width: 100vw !important; height: 100vh !important; border-radius: 0 !important; max-width: none !important; }
+        #fileModal .modal-header.full-bleed-header { padding: 1rem 1.25rem; }
     </style>
 </head>
 <body>
@@ -94,12 +98,24 @@
         </div>
     </div>
 
+    <div id="profileModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="profileTitle">Candidate Profile</h3>
+                <button class="modal-close" onclick="closeProfileModal()">✕</button>
+            </div>
+            <div class="modal-body">
+                <div id="profileBody" style="width:100%;max-width:1100px"></div>
+            </div>
+        </div>
+    </div>
+
     <script>
         function escapeHtml(t) { return String(t || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c])); }
         
         function formatDate(d) {
             if (!d) return '-';
-            try { return String(new Date(d).toLocaleDateString('en-IN', {year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})); }
+            try { return String(new Date(d).toLocaleDateString('en-IN', {year:'numeric',month:'short',day:'numeric'})); }
             catch { return String(d); }
         }
         
@@ -107,16 +123,21 @@
             const m = document.getElementById('fileModal');
             const c = document.getElementById('fileViewerContainer');
             document.getElementById('fileTitle').textContent = 'View: ' + escapeHtml(fname);
+            // make modal full-bleed on open for a laptop-like viewer
+            try { m.querySelector('.modal-content').classList.add('full-bleed'); } catch(e){}
+            try { m.querySelector('.modal-header').classList.add('full-bleed-header'); } catch(e){}
             try {
                 const ext = fname.split('.').pop().toLowerCase();
+                // Make embedded viewer wider for laptop screens by using viewport-relative widths
                 if (['jpg','jpeg','png','gif','bmp','webp'].includes(ext)) {
-                    c.innerHTML = `<img src="data:image/;base64,${b64}" class="file-preview-img" alt="${escapeHtml(fname)}" style="max-width:100%;border-radius:8px;">`;
+                    c.innerHTML = `<div style="display:flex;justify-content:center;width:100%"><img src="data:image/;base64,${b64}" class="file-preview-img" alt="${escapeHtml(fname)}" style="max-width:100vw;max-height:calc(100vh - 72px);border-radius:0;"></div>`;
                 } else if (ext === 'pdf') {
-                    c.innerHTML = `<iframe src="data:application/pdf;base64,${b64}" style="width:100%;height:80vh;border:none;border-radius:8px;"></iframe>`;
+                    // Full-bleed iframe for laptop screens
+                    c.innerHTML = `<div style="width:100%;height:100%"><iframe src="data:application/pdf;base64,${b64}" style="width:100vw;height:calc(100vh - 72px);border:none;"></iframe></div>`;
                 } else {
                     try {
                         const t = new TextDecoder('utf-8').decode(new Uint8Array(atob(b64).split('').map(x => x.charCodeAt(0))));
-                        c.innerHTML = `<pre class="file-preview-text">${escapeHtml(t.substring(0,10000))}</pre>`;
+                        c.innerHTML = `<div style="display:flex;justify-content:center;width:100%"><pre class="file-preview-text" style="max-width:100vw">${escapeHtml(t.substring(0,10000))}</pre></div>`;
                     } catch { c.innerHTML = '<div class="file-preview-text">Binary file - cannot preview</div>'; }
                 }
             } catch (e) { c.innerHTML = `<div class="file-preview-text">Error: ${escapeHtml(e.message)}</div>`; }
@@ -136,7 +157,10 @@
         
         function closeFileModal() { document.getElementById('fileModal').classList.remove('show'); }
         
-        window.onclick = (e) => { if (e.target === document.getElementById('fileModal')) closeFileModal(); };
+        window.onclick = (e) => { 
+            if (e.target === document.getElementById('fileModal')) closeFileModal(); 
+            if (e.target === document.getElementById('profileModal')) closeProfileModal(); 
+        };
         
         async function loadApprovedCandidates() {
             console.log('📡 Starting load...');
@@ -151,41 +175,100 @@
                 const cnt = document.getElementById('approvedCandidatesContainer');
                 
                 if (data.success && data.data && data.data.length > 0) {
-                    console.log('📊 Building table...');
-                    let html = '<table class="candidates-table"><thead><tr><th>Name</th><th>USN</th><th>Email</th><th>Phone</th><th>Year</th><th>Qualification</th><th>Branch</th><th>College</th><th>Domain</th><th>Mode</th><th>App ID</th><th>User ID</th><th>Created</th><th>Updated</th><th>Files</th></tr></thead><tbody>';
+                    console.log('📊 Building compact table...');
+                    // Only show the requested columns: Name, USN, View Profile, View Resume, View ID, View Project, Accept, Reject
+                    let html = '<table class="candidates-table"><thead><tr><th>Name</th><th>USN</th><th>Profile</th><th>Resume</th><th>ID</th><th>Project</th><th>Actions</th></tr></thead><tbody>';
                     data.data.forEach((c, idx) => {
-                        html += `<tr><td>${escapeHtml(c.name||'-')}</td><td>${escapeHtml(c.usn||'-')}</td><td>${escapeHtml(c.email||'-')}</td><td>${escapeHtml(c.phone_number||'-')}</td><td>${escapeHtml(c.year||'-')}</td><td>${escapeHtml(c.qualification||'-')}</td><td>${escapeHtml(c.branch||'-')}</td><td>${escapeHtml(c.college||'-')}</td><td>${escapeHtml(c.domain||'-')}</td><td>${escapeHtml(c.mode_of_interview||'-')}</td><td>${escapeHtml(c.application_id||'-')}</td><td>${escapeHtml(c.user_id||'-')}</td><td>${escapeHtml(formatDate(c.created_at))}</td><td>${escapeHtml(formatDate(c.updated_at))}</td><td style="min-width:120px"><div class="file-actions" id="files_${idx}">`;
-                        html += '</div></td></tr>';
+                        html += `<tr>`;
+                        html += `<td>${escapeHtml(c.name||'-')}</td>`;
+                        html += `<td>${escapeHtml(c.usn||'-')}</td>`;
+                        // Profile button column placeholder
+                        html += `<td style="width:120px"><div id="profile_col_${idx}"></div></td>`;
+                        // Resume column
+                        html += `<td style="width:120px"><div id="resume_col_${idx}"></div></td>`;
+                        // ID column
+                        html += `<td style="width:120px"><div id="id_col_${idx}"></div></td>`;
+                        // Project column
+                        html += `<td style="width:120px"><div id="project_col_${idx}"></div></td>`;
+                        // Actions (Accept / Reject)
+                        html += `<td style="width:160px"><div id="actions_col_${idx}"></div></td>`;
+                        html += `</tr>`;
                     });
                     html += '</tbody></table>';
                     cnt.innerHTML = html;
-                    console.log('✅ Table HTML inserted');
-                    
-                    // Attach file buttons using event listeners (avoid base64 in onclick)
+                    console.log('✅ Table HTML inserted (compact)');
+
+                    // Attach buttons into each column
                     data.data.forEach((c, idx) => {
-                        const fileDiv = document.getElementById(`files_${idx}`);
-                        if (!fileDiv) return;
-                        
-                        if (c.resume_content) {
-                            const vBtn = document.createElement('button');
-                            vBtn.className = 'file-btn';
-                            vBtn.textContent = 'View Resume';
-                            vBtn.onclick = () => viewFile(c.resume_name||'Resume', c.resume_content, 'r');
-                            fileDiv.appendChild(vBtn);
+                        // Profile button
+                        const pDiv = document.getElementById(`profile_col_${idx}`);
+                        if (pDiv) {
+                            const btn = document.createElement('button');
+                            btn.className = 'file-btn';
+                            btn.style.background = '#28a745';
+                            btn.textContent = 'View Profile';
+                            btn.onclick = () => viewProfile(c.user_id || c.application_id || c.id);
+                            pDiv.appendChild(btn);
                         }
-                        if (c.project_document_content) {
-                            const vBtn = document.createElement('button');
-                            vBtn.className = 'file-btn';
-                            vBtn.textContent = 'View Project';
-                            vBtn.onclick = () => viewFile(c.project_document_name||'Project', c.project_document_content, 'p');
-                            fileDiv.appendChild(vBtn);
+
+                        // Resume
+                        const rDiv = document.getElementById(`resume_col_${idx}`);
+                        if (rDiv) {
+                            if (c.resume_content) {
+                                const vBtn = document.createElement('button');
+                                vBtn.className = 'file-btn';
+                                vBtn.textContent = 'View Resume';
+                                vBtn.onclick = () => viewFile(c.resume_name||'Resume', c.resume_content, 'r');
+                                rDiv.appendChild(vBtn);
+                            } else {
+                                rDiv.innerHTML = '<span style="color:#777">-</span>';
+                            }
                         }
-                        if (c.id_proof_content) {
-                            const vBtn = document.createElement('button');
-                            vBtn.className = 'file-btn';
-                            vBtn.textContent = 'View ID';
-                            vBtn.onclick = () => viewFile(c.id_proof_name||'ID', c.id_proof_content, 'i');
-                            fileDiv.appendChild(vBtn);
+
+                        // ID
+                        const idDiv = document.getElementById(`id_col_${idx}`);
+                        if (idDiv) {
+                            if (c.id_proof_content) {
+                                const vBtn = document.createElement('button');
+                                vBtn.className = 'file-btn';
+                                vBtn.textContent = 'View ID';
+                                vBtn.onclick = () => viewFile(c.id_proof_name||'ID', c.id_proof_content, 'i');
+                                idDiv.appendChild(vBtn);
+                            } else {
+                                idDiv.innerHTML = '<span style="color:#777">-</span>';
+                            }
+                        }
+
+                        // Project
+                        const pjtDiv = document.getElementById(`project_col_${idx}`);
+                        if (pjtDiv) {
+                            if (c.project_document_content) {
+                                const vBtn = document.createElement('button');
+                                vBtn.className = 'file-btn';
+                                vBtn.textContent = 'View Project';
+                                vBtn.onclick = () => viewFile(c.project_document_name||'Project', c.project_document_content, 'p');
+                                pjtDiv.appendChild(vBtn);
+                            } else {
+                                pjtDiv.innerHTML = '<span style="color:#777">-</span>';
+                            }
+                        }
+
+                        // Actions: Accept / Reject
+                        const aDiv = document.getElementById(`actions_col_${idx}`);
+                        if (aDiv) {
+                            const accept = document.createElement('button');
+                            accept.className = 'file-btn';
+                            accept.style.background = '#007bff';
+                            accept.textContent = 'Accept';
+                            accept.onclick = () => { if (confirm('Accept this candidate?')) adminAccept(c.user_id || c.application_id || c.id); };
+                            aDiv.appendChild(accept);
+
+                            const rej = document.createElement('button');
+                            rej.className = 'file-btn';
+                            rej.style.background = '#dc3545';
+                            rej.textContent = 'Reject';
+                            rej.onclick = () => { if (confirm('Reject this candidate? This will delete their data.')) adminReject(c.user_id || c.application_id || c.id); };
+                            aDiv.appendChild(rej);
                         }
                     });
                     
@@ -202,6 +285,66 @@
             }
         }
         
+        async function viewProfile(id) {
+            try {
+                const modal = document.getElementById('profileModal');
+                const body = document.getElementById('profileBody');
+                document.getElementById('profileTitle').textContent = 'Candidate Profile';
+                body.innerHTML = '<p>Loading...</p>';
+                modal.classList.add('show');
+
+                // Try fetching single-candidate API
+                const r = await fetch(`/admin/api/get-approved-candidate/${id}`);
+                if (!r.ok) throw new Error('Failed to fetch profile');
+                const payload = await r.json();
+                if (!payload.success) throw new Error(payload.error || 'Unknown error');
+                const c = payload.data;
+
+                const rows = [];
+                const add = (k, v) => rows.push(`<tr><th style="text-align:left;padding:8px;color:#555;width:220px">${escapeHtml(k)}</th><td style="padding:8px">${escapeHtml(v||'-')}</td></tr>`);
+                add('Name', c.name);
+                add('USN', c.usn);
+                add('Email', c.email);
+                add('Phone', c.phone_number || c.phone);
+                add('Year', c.year);
+                add('Qualification', c.qualification);
+                add('Branch', c.branch);
+                add('College', c.college);
+                add('Domain', c.domain);
+                add('Mode of Interview', c.mode_of_interview);
+                add('Application ID', c.application_id);
+                add('User ID', c.user_id);
+                add('Created', formatDate(c.created_at));
+                add('Updated', formatDate(c.updated_at));
+
+                // Only show Close button in profile modal; file viewing handled from table buttons
+                let html = `<div style="width:100%"><div style="margin-bottom:1rem"><button class="file-btn" onclick="closeProfileModal()">Close</button></div><div style="overflow:auto"><table style="width:100%;border-collapse:collapse">${rows.join('')}</table></div></div>`;
+                body.innerHTML = html;
+            } catch (e) {
+                document.getElementById('profileBody').innerHTML = `<div class="empty-state"><p>Error: ${escapeHtml(e.message)}</p></div>`;
+            }
+        }
+
+        function closeProfileModal() { document.getElementById('profileModal').classList.remove('show'); }
+
+        async function adminAccept(id) {
+            try {
+                const r = await fetch(`/accept/${id}`, { method: 'POST' });
+                const j = await r.json();
+                if (j.success) { alert('Accept email sent.'); loadApprovedCandidates(); }
+                else alert('Accept failed: ' + (j.error || j.message || JSON.stringify(j)));
+            } catch (e) { alert('Error: ' + e.message); }
+        }
+
+        async function adminReject(id) {
+            try {
+                const r = await fetch(`/reject/${id}`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({reason: 'Rejected by admin'}) });
+                const j = await r.json();
+                if (j.success) { alert('Rejected and removed.'); loadApprovedCandidates(); }
+                else alert('Reject failed: ' + (j.error || j.message || JSON.stringify(j)));
+            } catch (e) { alert('Error: ' + e.message); }
+        }
+
         document.addEventListener('DOMContentLoaded', loadApprovedCandidates);
         setInterval(loadApprovedCandidates, 30000);
     </script>

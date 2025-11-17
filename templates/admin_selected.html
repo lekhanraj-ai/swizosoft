@@ -273,6 +273,15 @@
                 font-size: 1.2rem;
             }
         }
+        /* Modal and button styles similar to approved candidates page */
+        .file-btn { background: #667eea; color: white; border: none; padding: 0.45rem 0.8rem; border-radius: 6px; font-size: 0.9rem; cursor: pointer; }
+        .file-btn:hover { opacity: 0.95; }
+        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); }
+        .modal.show { display: flex; align-items: center; justify-content: center; }
+        .modal-content { background: white; box-shadow: 0 4px 20px rgba(0,0,0,0.3); width: 95vw; height: 85vh; display: flex; flex-direction: column; border-radius: 8px; }
+        .modal-header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 1rem 1.25rem; display:flex; justify-content:space-between; align-items:center; }
+        .modal-close { background: rgba(255,255,255,0.2); border: none; color: white; font-size: 1.25rem; cursor: pointer; padding: 0.25rem 0.5rem; border-radius: 4px; }
+        .modal-body { padding: 1.25rem; overflow-y: auto; flex-grow: 1; display:flex; justify-content:center; }
     </style>
 </head>
 <body>
@@ -290,6 +299,18 @@
                 <a href="{{ url_for('admin_logout') }}" class="nav-link logout-link">Logout</a>
             </div>
         </div>
+
+            <div id="selectedProfileModal" class="modal">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h3 id="selectedProfileTitle">Candidate Profile</h3>
+                        <button class="modal-close" onclick="closeSelectedProfile()">✕</button>
+                    </div>
+                    <div class="modal-body">
+                        <div id="selectedProfileBody" style="width:100%;max-width:1100px"></div>
+                    </div>
+                </div>
+            </div>
     </nav>
 
     <div class="container">
@@ -311,22 +332,13 @@
                     <thead>
                         <tr>
                             <th>Name</th>
-                            <th>Email</th>
-                            <th>Phone</th>
-                            <th>Branch</th>
-                            <th>College</th>
-                            <th>Qualification</th>
-                            <th>Year</th>
                             <th>USN</th>
-                            <th>Domain</th>
-                            <th>Internship Duration</th>
-                            <th>Approved Date</th>
-                            <th>Completion Date</th>
+                            <th>Profile</th>
                         </tr>
                     </thead>
                     <tbody id="selectedTableBody">
                         <tr>
-                            <td colspan="11" style="text-align: center; padding: 2rem;">
+                            <td colspan="3" style="text-align: center; padding: 2rem;">
                                 <div class="empty-state">
                                     <div class="empty-state-icon">📋</div>
                                     <p>Loading candidates...</p>
@@ -348,32 +360,39 @@
                 if (data.success && data.data && data.data.length > 0) {
                     const tbody = document.getElementById('selectedTableBody');
                     tbody.innerHTML = '';
-                    
-                    data.data.forEach(candidate => {
+
+                    data.data.forEach((candidate, idx) => {
                         const row = document.createElement('tr');
-                        row.innerHTML = `
-                            <td>${escapeHtml(candidate.name || '')}</td>
-                            <td class="email">${escapeHtml(candidate.email || '')}</td>
-                            <td class="phone">${escapeHtml(candidate.phone || '')}</td>
-                            <td>${escapeHtml(candidate.branch || '')}</td>
-                            <td>${escapeHtml(candidate.college || '')}</td>
-                            <td>${escapeHtml(candidate.qualification || '')}</td>
-                            <td>${escapeHtml(candidate.year || '')}</td>
-                            <td><span class="usn">${escapeHtml(candidate.usn || '')}</span></td>
-                            <td>${escapeHtml(candidate.domain || '')}</td>
-                            <td>${escapeHtml(candidate.internship_duration || '-')}</td>
-                            <td class="date">${formatDate(candidate.approved_date)}</td>
-                            <td class="date">${formatDate(candidate.completion_date)}</td>
-                        `;
+                        const nameTd = document.createElement('td');
+                        nameTd.textContent = candidate.name || '';
+
+                        const usnTd = document.createElement('td');
+                        usnTd.innerHTML = `<span class="usn">${escapeHtml(candidate.usn || '')}</span>`;
+
+                        const profileTd = document.createElement('td');
+                        const btn = document.createElement('button');
+                        btn.textContent = 'View Profile';
+                        btn.style.padding = '0.5rem 1rem';
+                        btn.style.background = '#28a745';
+                        btn.style.color = 'white';
+                        btn.style.border = 'none';
+                        btn.style.borderRadius = '6px';
+                        btn.style.cursor = 'pointer';
+                        btn.onclick = () => openSelectedProfile(candidate.usn || candidate.application_id || candidate.user_id);
+                        profileTd.appendChild(btn);
+
+                        row.appendChild(nameTd);
+                        row.appendChild(usnTd);
+                        row.appendChild(profileTd);
                         tbody.appendChild(row);
                     });
-                    
+
                     document.getElementById('selected-count').textContent = data.data.length;
                 } else {
                     const tbody = document.getElementById('selectedTableBody');
                     tbody.innerHTML = `
                         <tr>
-                            <td colspan="11" style="text-align: center; padding: 2rem;">
+                            <td colspan="3" style="text-align: center; padding: 2rem;">
                                 <div class="empty-state">
                                     <div class="empty-state-icon">📭</div>
                                     <p>No selected candidates yet</p>
@@ -422,6 +441,45 @@
 
         document.addEventListener('DOMContentLoaded', loadSelectedCandidates);
         setInterval(loadSelectedCandidates, 30000);
+
+        async function openSelectedProfile(id) {
+            try {
+                const modal = document.getElementById('selectedProfileModal');
+                const body = document.getElementById('selectedProfileBody');
+                body.innerHTML = '<p>Loading...</p>';
+                modal.classList.add('show');
+
+                // Fetch single selected candidate by USN or id
+                const r = await fetch(`/admin/api/get-selected-candidate/${encodeURIComponent(id)}`);
+                if (!r.ok) throw new Error('Failed to fetch profile');
+                const payload = await r.json();
+                if (!payload.success) throw new Error(payload.error || 'Unknown error');
+                const c = payload.data;
+
+                const rows = [];
+                const add = (k, v) => rows.push(`<tr><th style="text-align:left;padding:8px;color:#555;width:220px">${escapeHtml(k)}</th><td style="padding:8px">${escapeHtml(v||'-')}</td></tr>`);
+                add('Name', c.name);
+                add('USN', c.usn);
+                add('Email', c.email);
+                add('Phone', c.phone || c.phone_number);
+                add('Year', c.year);
+                add('Qualification', c.qualification);
+                add('Branch', c.branch);
+                add('College', c.college);
+                add('Domain', c.domain);
+                add('Application ID', c.application_id);
+                add('User ID', c.user_id);
+                add('Approved Date', formatDate(c.approved_date));
+                add('Completion Date', formatDate(c.completion_date));
+
+                const html = `<div style="width:100%"><div style="margin-bottom:1rem"><button class="file-btn" onclick="closeSelectedProfile()">Close</button></div><div style="overflow:auto"><table style="width:100%;border-collapse:collapse">${rows.join('')}</table></div></div>`;
+                body.innerHTML = html;
+            } catch (e) {
+                document.getElementById('selectedProfileBody').innerHTML = `<div class="empty-state"><p>Error: ${escapeHtml(e.message)}</p></div>`;
+            }
+        }
+
+        function closeSelectedProfile() { document.getElementById('selectedProfileModal').classList.remove('show'); }
     </script>
 </body>
 </html>

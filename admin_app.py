@@ -320,6 +320,56 @@ def admin_api_get_selected():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/admin/api/get-selected-candidate/<identifier>')
+@login_required
+def admin_api_get_selected_candidate(identifier):
+    """Fetch a single Selected record by application_id, user_id (numeric) or USN (string)."""
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+
+        # Try numeric match first
+        row = None
+        try:
+            if identifier.isdigit():
+                # Try application_id or user_id numeric match
+                cursor.execute('SELECT * FROM `Selected` WHERE application_id = %s LIMIT 1', (int(identifier),))
+                row = cursor.fetchone()
+                if not row:
+                    cursor.execute('SELECT * FROM `Selected` WHERE user_id = %s LIMIT 1', (int(identifier),))
+                    row = cursor.fetchone()
+        except Exception:
+            row = None
+
+        # If not found and identifier is non-numeric, try USN match
+        if not row:
+            try:
+                cursor.execute('SELECT * FROM `Selected` WHERE usn = %s LIMIT 1', (identifier,))
+                row = cursor.fetchone()
+            except Exception:
+                row = None
+
+        cursor.close()
+        conn.close()
+
+        if not row:
+            return jsonify({'success': False, 'error': 'Selected candidate not found'}), 404
+
+        # Convert bytes to base64 for any binary fields
+        processed = {}
+        for k, v in (row.items() if isinstance(row, dict) else []):
+            if isinstance(v, bytes):
+                import base64
+                processed[k] = base64.b64encode(v).decode('utf-8')
+            else:
+                processed[k] = v
+
+        return jsonify({'success': True, 'data': processed})
+    except Exception as e:
+        print(f"✗ Exception in /admin/api/get-selected-candidate: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/admin/api/get-approved-candidates')
 @login_required
 def admin_api_get_approved_candidates():
@@ -435,6 +485,35 @@ def admin_api_get_approved_file(usn):
         })
     except Exception as e:
         print(f"✗ Exception in /admin/api/get-approved-file: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/admin/api/get-approved-candidate/<int:user_id>', methods=['GET'])
+@login_required
+def admin_api_get_approved_candidate(user_id):
+    """Return a single approved candidate record by user_id or application_id."""
+    try:
+        # Try by user_id first
+        candidate = ApprovedCandidate.query.filter_by(user_id=user_id).first()
+        # Fallback to application_id as string
+        if not candidate:
+            candidate = ApprovedCandidate.query.filter_by(application_id=str(user_id)).first()
+
+        if not candidate:
+            return jsonify({'success': False, 'error': 'Candidate not found'}), 404
+
+        candidate_dict = candidate.to_dict()
+
+        # Convert BLOBs to base64 strings for JSON
+        if candidate_dict.get('resume_content') and isinstance(candidate_dict['resume_content'], bytes):
+            candidate_dict['resume_content'] = base64.b64encode(candidate_dict['resume_content']).decode('utf-8')
+        if candidate_dict.get('project_document_content') and isinstance(candidate_dict['project_document_content'], bytes):
+            candidate_dict['project_document_content'] = base64.b64encode(candidate_dict['project_document_content']).decode('utf-8')
+        if candidate_dict.get('id_proof_content') and isinstance(candidate_dict['id_proof_content'], bytes):
+            candidate_dict['id_proof_content'] = base64.b64encode(candidate_dict['id_proof_content']).decode('utf-8')
+
+        return jsonify({'success': True, 'data': candidate_dict})
+    except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -889,6 +968,11 @@ def admin_accept(user_id):
                         if exists:
                             # USN already exists: update the existing Selected record (upsert behavior)
                             try:
+                                # Parse months from internship_duration (e.g., '1 month', '3 months')
+                                import re
+                                m = re.search(r"(\d+)", str(internship_duration_val or '1'))
+                                months = int(m.group(1)) if m else 1
+
                                 update_sql = """UPDATE Selected SET
                                     application_id = %s,
                                     name = %s,
@@ -906,14 +990,14 @@ def admin_accept(user_id):
                                     internship_duration = %s,
                                     approved_date = CURDATE(),
                                     status = 'ongoing',
-                                    completion_date = CURDATE()
+                                    completion_date = DATE_ADD(CURDATE(), INTERVAL %s MONTH)
                                     WHERE usn = %s"""
 
                                 cursor.execute(update_sql, (
                                     application_id, name_val, email_val, phone_val,
                                     year_val, qualification_val, branch_val, college_val, domain_val,
                                     project_description_val, project_name_val, project_blob, project_name_val,
-                                    internship_duration_val, usn_val
+                                    internship_duration_val, months, usn_val
                                 ))
                                 conn.commit()
                                 inserted = True
@@ -922,16 +1006,21 @@ def admin_accept(user_id):
                                 app.logger.error(f"Failed to update existing Selected record for USN {usn_val}: {e}")
                                 # fall through with inserted False
                         else:
+                            # Parse months for completion_date
+                            import re
+                            m = re.search(r"(\d+)", str(internship_duration_val or '1'))
+                            months = int(m.group(1)) if m else 1
+
                             insert_sql = """INSERT INTO Selected 
                             (application_id, name, email, phone, usn, year, qualification, branch, college, domain, 
-                             project_description, internship_project_name, internship_project_content, project_title, internship_duration)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
+                             project_description, internship_project_name, internship_project_content, project_title, internship_duration, approved_date, status, completion_date)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURDATE(), 'ongoing', DATE_ADD(CURDATE(), INTERVAL %s MONTH))"""
 
                             cursor.execute(insert_sql, (
                                 application_id, name_val, email_val, phone_val, usn_val, year_val,
                                 qualification_val, branch_val, college_val, domain_val,
                                 project_description_val, project_name_val, project_blob, project_name_val,
-                                internship_duration_val
+                                internship_duration_val, months
                             ))
                             conn.commit()
                             inserted = True
