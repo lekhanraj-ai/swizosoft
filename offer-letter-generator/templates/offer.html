@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Swizosoft Offer Letter Generator</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <div class="navbar">
+      <div class="header-text">Swizosoft</div>
+    </div>
+
+    <div class="page-title">
+      <h1>Generate Offer Letter</h1>
+      <p>Fill the details to generate the official internship offer letter</p>
+    </div>
+
+    <div class="form-box">
+      <h2>Offer Letter Details</h2>
+
+      <form action="/generate-offer" method="POST">
+        <input
+          type="text"
+          name="candidate"
+          placeholder="Candidate Name"
+          required
+        />
+        <input type="text" name="college" placeholder="College Name" required />
+        <input type="email" name="email" placeholder="Email ID" required />
+        <input
+          type="text"
+          name="role"
+          placeholder="Internship Role (e.g., UI/UX Intern)"
+          required
+        />
+
+        <input
+          type="text"
+          name="month"
+          placeholder="Duration (e.g., 3 months)"
+          required
+        />
+
+        <select name="intern_type" required>
+          <option value="" disabled selected>Select Internship Type</option>
+          <option value="remote-based opportunity">
+            Remote-based opportunity
+          </option>
+          <option value="hybrid-based opportunity">
+            Hybrid-based opportunity
+          </option>
+          <option value="on-site based opportunity">
+            On-site based opportunity
+          </option>
+        </select>
+
+        <button type="submit">Generate Offer Letter</button>
+      </form>
+    </div>
+  </body>
+</html>

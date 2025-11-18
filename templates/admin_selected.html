@@ -312,13 +312,15 @@
                 <th>Roles</th>
                 <th>Approved Date</th>
                 <th>Completion Date</th>
+                <th>Offer Letter</th>
+                <th>Certificate</th>
                 <th>Profile</th>
                 <th>Action</th>
               </tr>
             </thead>
             <tbody id="selectedTableBody">
               <tr>
-                <td colspan="8" style="text-align: center; padding: 2rem">
+                <td colspan="10" style="text-align: center; padding: 2rem">
                   <div class="empty-state" style="padding: 1rem">
                     <div class="empty-state-icon">📋</div>
                     <p>Loading candidates...</p>
@@ -410,6 +412,55 @@
                 candidate.completion_date || "-"
               );
 
+              const offerLetterTd = document.createElement("td");
+              if (candidate.offer_letter_reference) {
+                const downloadBtn = document.createElement("button");
+                downloadBtn.textContent = "📄 Download";
+                downloadBtn.className = "action-btn";
+                downloadBtn.style.background = "#17a2b8";
+                downloadBtn.style.color = "white";
+                downloadBtn.onclick = () => downloadOfferLetter(candidate.usn);
+                const viewBtn = document.createElement("button");
+                viewBtn.textContent = "👁️ View";
+                viewBtn.className = "action-btn";
+                viewBtn.style.background = "#6c757d";
+                viewBtn.style.color = "white";
+                viewBtn.style.marginLeft = "4px";
+                viewBtn.onclick = () => viewOfferLetter(candidate.usn);
+                offerLetterTd.appendChild(downloadBtn);
+                offerLetterTd.appendChild(viewBtn);
+              } else {
+                const noOfferSpan = document.createElement("span");
+                noOfferSpan.textContent = "-";
+                noOfferSpan.style.color = "#999";
+                offerLetterTd.appendChild(noOfferSpan);
+              }
+
+              const certificateTd = document.createElement("td");
+              if (candidate.certificate_id) {
+                const downloadCertBtn = document.createElement("button");
+                downloadCertBtn.textContent = "📜 Download";
+                downloadCertBtn.className = "action-btn";
+                downloadCertBtn.style.background = "#fd7e14";
+                downloadCertBtn.style.color = "white";
+                downloadCertBtn.onclick = () =>
+                  downloadCertificate(candidate.usn);
+                const viewCertBtn = document.createElement("button");
+                viewCertBtn.textContent = "👁️ View";
+                viewCertBtn.className = "action-btn";
+                viewCertBtn.style.background = "#6c757d";
+                viewCertBtn.style.color = "white";
+                viewCertBtn.style.marginLeft = "4px";
+                viewCertBtn.onclick = () => viewCertificate(candidate.usn);
+                certificateTd.appendChild(downloadCertBtn);
+                certificateTd.appendChild(viewCertBtn);
+              } else {
+                const noCertSpan = document.createElement("span");
+                noCertSpan.textContent = "-";
+                noCertSpan.style.color = "#999";
+                certificateTd.appendChild(noCertSpan);
+              }
+
               const profileTd = document.createElement("td");
               const btn = document.createElement("button");
               btn.textContent = "View Profile";
@@ -439,6 +490,8 @@
               row.appendChild(rolesTd);
               row.appendChild(approvedDateTd);
               row.appendChild(completionDateTd);
+              row.appendChild(offerLetterTd);
+              row.appendChild(certificateTd);
               row.appendChild(profileTd);
               row.appendChild(actionTd);
               tbody.appendChild(row);
@@ -450,7 +503,7 @@
             const tbody = document.getElementById("selectedTableBody");
             tbody.innerHTML = `
                         <tr>
-                            <td colspan="8" style="text-align: center; padding: 2rem;">
+                            <td colspan="10" style="text-align: center; padding: 2rem;">
                                 <div class="empty-state" style="padding: 1rem;">
                                     <div class="empty-state-icon">📭</div>
                                     <p>No selected candidates yet</p>
@@ -465,7 +518,7 @@
           const tbody = document.getElementById("selectedTableBody");
           tbody.innerHTML = `
                     <tr>
-                        <td colspan="8" style="text-align: center; padding: 2rem;">
+                        <td colspan="10" style="text-align: center; padding: 2rem;">
                             <div class="empty-state" style="padding: 1rem;">
                                 <div class="empty-state-icon">⚠️</div>
                                 <p>Error loading candidates</p>
@@ -583,6 +636,36 @@
         if (e.target === document.getElementById("selectedProfileModal"))
           closeSelectedProfile();
       };
+
+      // Offer letter functions
+      function downloadOfferLetter(usn) {
+        const url = `/admin/api/download-offer-letter/${encodeURIComponent(
+          usn
+        )}`;
+        window.location.href = url;
+      }
+
+      function viewOfferLetter(usn) {
+        const url = `/admin/api/download-offer-letter/${encodeURIComponent(
+          usn
+        )}`;
+        window.open(url, "_blank");
+      }
+
+      // Certificate functions
+      function downloadCertificate(usn) {
+        const url = `/admin/api/download-certificate-db/${encodeURIComponent(
+          usn
+        )}`;
+        window.location.href = url;
+      }
+
+      function viewCertificate(usn) {
+        const url = `/admin/api/download-certificate-db/${encodeURIComponent(
+          usn
+        )}`;
+        window.open(url, "_blank");
+      }
     </script>
   </body>
 </html>

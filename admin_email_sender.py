@@ -216,3 +216,130 @@ Swizosoft Pvt. Ltd."""
     except Exception as e:
         current_app.logger.exception('Failed to send reject email')
         return False
+
+
+def send_offer_letter_email(recipient_email, recipient_name, offer_letter_pdf_bytes, offer_letter_reference):
+    """Send offer letter as email attachment to candidate.
+    
+    This function is called when an offer letter is generated for an approved candidate.
+    The PDF is stored in binary format in the database and is sent as an attachment.
+    
+    Args:
+        recipient_email: Email address of the candidate
+        recipient_name: Name of the candidate
+        offer_letter_pdf_bytes: Binary PDF data of the offer letter
+        offer_letter_reference: Reference number of the offer letter (for filename)
+    """
+    try:
+        from io import BytesIO
+        sender = current_app.config.get('MAIL_DEFAULT_SENDER')
+        
+        subject = "Swizosoft — Your Internship Offer Letter"
+        
+        body = f"""Hi {recipient_name},
+
+Congratulations!
+
+We are delighted to extend an offer for an internship position at Swizosoft. Please find your detailed offer letter attached to this email.
+
+Please review the offer letter carefully and get back to us with your acceptance/confirmation at your earliest convenience.
+
+If you have any questions regarding the offer or need any clarifications, please feel free to reach out to us.
+
+We look forward to your positive response.
+
+Best regards,
+Swizosoft Pvt. Ltd."""
+
+        html = f"""<p>Hi {recipient_name},</p>
+
+<p><strong>Congratulations!</strong></p>
+
+<p>We are delighted to extend an offer for an internship position at <strong>Swizosoft</strong>. Please find your detailed offer letter attached to this email.</p>
+
+<p>Please review the offer letter carefully and get back to us with your acceptance/confirmation at your earliest convenience.</p>
+
+<p>If you have any questions regarding the offer or need any clarifications, please feel free to reach out to us.</p>
+
+<p>We look forward to your positive response.</p>
+
+<p>Best regards,<br/><strong>Swizosoft Pvt. Ltd.</strong></p>"""
+
+        msg = Message(subject=subject, sender=sender, recipients=[recipient_email])
+        msg.body = body
+        msg.html = html
+        
+        # Attach the PDF
+        filename = f"SZS_OFFR_{offer_letter_reference.replace('/', '_')}.pdf"
+        msg.attach(filename, "application/pdf", offer_letter_pdf_bytes)
+        
+        mail.send(msg)
+        current_app.logger.info(f"Offer letter email sent to {recipient_email} with reference {offer_letter_reference}")
+        return True
+    except Exception as e:
+        current_app.logger.exception(f'Failed to send offer letter email to {recipient_email}')
+        return False
+
+
+def send_certificate_email(recipient_email, recipient_name, certificate_pdf_bytes, certificate_id):
+    """Send issued certificate as email attachment to candidate.
+    
+    This function is called when a certificate is issued for a completed internship.
+    The PDF is stored in binary format in the database and is sent as an attachment.
+    
+    Args:
+        recipient_email: Email address of the candidate
+        recipient_name: Name of the candidate
+        certificate_pdf_bytes: Binary PDF data of the certificate
+        certificate_id: ID of the certificate (for filename)
+    """
+    try:
+        from io import BytesIO
+        sender = current_app.config.get('MAIL_DEFAULT_SENDER')
+        
+        subject = "Swizosoft — Your Internship Completion Certificate"
+        
+        body = f"""Hi {recipient_name},
+
+Congratulations on completing your internship at Swizosoft!
+
+You have successfully completed all the requirements of the internship program. Please find your internship completion certificate attached to this email.
+
+This certificate recognizes your dedication and contributions during your time with us. We appreciate your hard work and wish you all the best for your future endeavors.
+
+Feel free to share this certificate with your college/university and include it in your academic records.
+
+If you have any questions, please feel free to reach out to us.
+
+Best regards,
+Swizosoft Pvt. Ltd."""
+
+        html = f"""<p>Hi {recipient_name},</p>
+
+<p><strong>Congratulations on completing your internship at Swizosoft!</strong></p>
+
+<p>You have successfully completed all the requirements of the internship program. Please find your internship completion certificate attached to this email.</p>
+
+<p>This certificate recognizes your dedication and contributions during your time with us. We appreciate your hard work and wish you all the best for your future endeavors.</p>
+
+<p>Feel free to share this certificate with your college/university and include it in your academic records.</p>
+
+<p>If you have any questions, please feel free to reach out to us.</p>
+
+<p>Best regards,<br/><strong>Swizosoft Pvt. Ltd.</strong></p>"""
+
+        msg = Message(subject=subject, sender=sender, recipients=[recipient_email])
+        msg.body = body
+        msg.html = html
+        
+        # Attach the PDF
+        filename = f"{certificate_id}.pdf"
+        msg.attach(filename, "application/pdf", certificate_pdf_bytes)
+        
+        mail.send(msg)
+        current_app.logger.info(f"Certificate email sent to {recipient_email} with certificate ID {certificate_id}")
+        return True
+    except Exception as e:
+        current_app.logger.exception(f'Failed to send certificate email to {recipient_email}')
+        return False
+

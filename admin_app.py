@@ -7,6 +7,7 @@ from functools import wraps
 import json
 import base64
 import os
+import re
 from datetime import datetime
 
 # Minimal Admin-only Flask app
@@ -54,7 +55,7 @@ app.config.update({
 })
 
 # Initialize mail (admin_email_sender provides the Mail() instance)
-from admin_email_sender import mail, send_accept_email, send_reject_email
+from admin_email_sender import mail, send_accept_email, send_reject_email, send_offer_letter_email, send_certificate_email
 mail.init_app(app)
 
 # Files uploaded path (change via env or config if needed)
@@ -1264,8 +1265,8 @@ def _fetch_applicant_contact(internship_id, internship_type='free'):
             except Exception:
                 pass
 
-def handle_approved_candidate_accept(approved_candidate):
-    """Handle acceptance of an approved candidate - transfer to Selected table"""
+def handle_approved_candidate_accept(approved_candidate, internship_type='free'):
+    """Handle acceptance of an approved candidate - transfer to Selected table and generate offer letter"""
     try:
         conn = get_db()
         cursor = conn.cursor()
@@ -1292,6 +1293,11 @@ def handle_approved_candidate_accept(approved_candidate):
         # Generate candidate_id
         candidate_id = generate_candidate_id(domain_val, conn)
         
+        # Determine duration based on internship type
+        duration_months = 1
+        if internship_type in ('paid', 'remote-based opportunity', 'hybrid-based opportunity', 'on-site based opportunity'):
+            duration_months = 3  # Default 3 months for paid/specified types
+        
         if exists:
             # Update existing record
             try:
@@ -1307,15 +1313,15 @@ def handle_approved_candidate_accept(approved_candidate):
                     roles = %s,
                     approved_date = CURDATE(),
                     status = 'ongoing',
-                    completion_date = DATE_ADD(CURDATE(), INTERVAL 1 MONTH),
+                    completion_date = DATE_ADD(CURDATE(), INTERVAL %s MONTH),
                     candidate_id = %s,
-                    mode_of_internship = 'free'
+                    mode_of_internship = %s
                     WHERE usn = %s"""
                 
                 cursor.execute(update_sql, (
                     name_val, email_val, phone_val,
                     year_val, qualification_val, branch_val, college_val, domain_val,
-                    role_val, candidate_id, usn_val
+                    role_val, duration_months, candidate_id, internship_type, usn_val
                 ))
                 conn.commit()
                 app.logger.info(f"Updated Selected record for approved candidate {usn_val}")
@@ -1331,12 +1337,12 @@ def handle_approved_candidate_accept(approved_candidate):
                 insert_sql = """INSERT INTO Selected 
                 (name, email, phone, usn, year, qualification, branch, college, domain, roles,
                  approved_date, status, completion_date, candidate_id, mode_of_internship)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURDATE(), 'ongoing', DATE_ADD(CURDATE(), INTERVAL 1 MONTH), %s, 'free')"""
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURDATE(), 'ongoing', DATE_ADD(CURDATE(), INTERVAL %s MONTH), %s, %s)"""
                 
                 cursor.execute(insert_sql, (
                     name_val, email_val, phone_val, usn_val, year_val,
                     qualification_val, branch_val, college_val, domain_val,
-                    role_val, candidate_id
+                    role_val, duration_months, candidate_id, internship_type
                 ))
                 conn.commit()
                 app.logger.info(f"Inserted approved candidate {usn_val} into Selected with ID {candidate_id}")
@@ -1359,13 +1365,64 @@ def handle_approved_candidate_accept(approved_candidate):
         cursor.close()
         conn.close()
         
+        # Try to generate offer letter automatically
+        offer_letter_ref = None
+        offer_letter_filename = None
+        try:
+            import requests
+            offer_letter_data = {
+                'name': name_val,
+                'usn': usn_val,
+                'email': email_val,
+                'college': college_val,
+                'role': role_val,
+                'duration': '3 months',  # Default duration
+                'internship_type': internship_type
+            }
+            
+            # Try to call the offer-letter-generator app API
+            try:
+                response = requests.post(
+                    'http://localhost:5001/api/generate-offer',
+                    json=offer_letter_data,
+                    timeout=30
+                )
+                if response.status_code == 200:
+                    result = response.json()
+                    if result.get('success'):
+                        offer_letter_ref = result.get('reference_number')
+                        offer_letter_filename = result.get('filename')
+                        app.logger.info(f"✓ Offer letter generated successfully for {usn_val} - Ref: {offer_letter_ref}")
+                    else:
+                        app.logger.warning(f"Offer letter generation error: {result.get('error', 'Unknown error')}")
+                else:
+                    app.logger.warning(f"Offer letter generation returned status {response.status_code}")
+            except requests.exceptions.ConnectionError:
+                app.logger.warning(f"Could not connect to offer-letter-generator service on localhost:5001 - ensure it's running")
+            except Exception as e:
+                app.logger.warning(f"Error generating offer letter: {e}")
+        except Exception as e:
+            app.logger.warning(f"Skipping offer letter generation: {e}")
+        
         # Send acceptance email
         ok = send_accept_email(email_val, name_val or '', internship_type='free')
         
+        response_data = {
+            'success': True,
+            'message': 'Accepted! Candidate moved to Selected',
+            'candidate_id': candidate_id
+        }
+        
+        if offer_letter_ref:
+            response_data['offer_letter'] = {
+                'reference': offer_letter_ref,
+                'filename': offer_letter_filename
+            }
+        
         if ok:
-            return jsonify({'success': True, 'message': 'Accepted! Candidate moved to Selected and will receive an email', 'candidate_id': candidate_id})
-        else:
-            return jsonify({'success': True, 'message': 'Candidate moved to Selected but failed to send email', 'candidate_id': candidate_id})
+            response_data['message'] = 'Accepted! Offer letter generated and email sent'
+        
+        return jsonify(response_data)
     
     except Exception as e:
         app.logger.exception(f"Error handling approved candidate acceptance: {e}")
@@ -1376,6 +1433,16 @@ def handle_approved_candidate_accept(approved_candidate):
 def admin_accept(user_id):
     """Accept an internship application and move to appropriate table"""
     
+    # Extract internship type from request
+    internship_type = 'free'
+    try:
+        if request.is_json:
+            internship_type = request.get_json().get('internship_type', 'free')
+        elif request.form:
+            internship_type = request.form.get('internship_type', 'free')
+    except Exception as e:
+        app.logger.warning(f"Could not extract internship_type: {e}")
+    
     # First check if this is an approved candidate (try by user_id or application_id)
     try:
         approved_candidate = ApprovedCandidate.query.filter_by(user_id=user_id).first()
@@ -1385,7 +1452,7 @@ def admin_accept(user_id):
         
         if approved_candidate:
             # Handle approved candidate acceptance - move to Selected
-            return handle_approved_candidate_accept(approved_candidate)
+            return handle_approved_candidate_accept(approved_candidate, internship_type)
     except Exception as e:
         app.logger.warning(f"Could not check approved candidates for user {user_id}: {e}")
     
@@ -1693,6 +1760,49 @@ def admin_accept(user_id):
                 ))
                 conn.commit()
                 app.logger.info(f"✓ Successfully inserted paid applicant {user_id} ({usn_val}) into Selected with candidate_id: {candidate_id_val} | Duration: {duration_months} months")
+                
+                # Auto-generate and store offer letter for paid internship
+                try:
+                    # Prepare offer letter data
+                    internship_type = 'paid'
+                    duration_str = f"{duration_months} month{'s' if duration_months != 1 else ''}"
+                    
+                    # Generate offer letter PDF
+                    offer_output, offer_ref_no = generate_offer_pdf(
+                        name_val, 
+                        usn_val, 
+                        college_val, 
+                        email_val, 
+                        role_val, 
+                        duration_str, 
+                        internship_type
+                    )
+                    
+                    if offer_output and offer_ref_no:
+                        # Get PDF bytes
+                        pdf_bytes = offer_output.getvalue()
+                        
+                        # Store offer letter in database
+                        update_sql = """UPDATE Selected SET 
+                            offer_letter_pdf = %s,
+                            offer_letter_reference = %s,
+                            offer_letter_generated_date = NOW()
+                            WHERE usn = %s"""
+                        
+                        cursor.execute(update_sql, (pdf_bytes, offer_ref_no, usn_val))
+                        conn.commit()
+                        app.logger.info(f"✓ Auto-generated and stored offer letter for paid internship {usn_val} with ref {offer_ref_no}")
+                        
+                        # Send offer letter via email
+                        try:
+                            send_offer_letter_email(email_val, name_val, pdf_bytes, offer_ref_no)
+                            app.logger.info(f"✓ Offer letter email sent to {email_val}")
+                        except Exception as email_err:
+                            app.logger.warning(f"Failed to send offer letter email to {email_val}: {email_err}")
+                    else:
+                        app.logger.warning(f"Failed to auto-generate offer letter for paid internship {usn_val}")
+                except Exception as e:
+                    app.logger.warning(f"Error auto-generating offer letter for paid internship {usn_val}: {e}")
                 
                 # Delete from paid_internship_application and paid_document_store
                 try:
@@ -2758,17 +2868,18 @@ def generate_certificate_pdf(candidate_name):
 @app.route('/admin/api/generate-certificate/<candidate_id>', methods=['POST'])
 @login_required
 def generate_certificate(candidate_id):
-    """Generate certificate for a candidate using SWIZ_CERTI.
+    """Generate certificate for a candidate using SWIZ_CERTI and store in database.
 
     Accepts numeric or string identifiers. Tries multiple candidate fields
-    to locate the ApprovedCandidate record to avoid 404s when frontend
-    passes non-numeric IDs.
+    to locate the Selected record to store certificate.
     """
     try:
         # Lookup candidate in Selected table (primary source for certificate details)
         conn = get_db()
         cursor = conn.cursor()
         row = None
+        usn_for_storage = None
+        
         try:
             # If numeric, try application_id or user_id
             if str(candidate_id).isdigit():
@@ -2805,18 +2916,70 @@ def generate_certificate(candidate_id):
             app.logger.warning(f"Selected lookup failed for identifier: {candidate_id}")
             return jsonify({'success': False, 'error': 'Candidate not found in Selected table'}), 404
 
-        # Extract name from Selected row
+        # Extract name from Selected row and get USN for database storage
         candidate_name = (row.get('name') or '').strip().upper()
+        usn_for_storage = row.get('usn', '')
+        candidate_id_val = row.get('candidate_id', '')
+        candidate_email = row.get('email', '')
+        
         if not candidate_name:
             return jsonify({'success': False, 'error': 'Candidate name not found'}), 400
+
+        app.logger.info(f"Certificate lookup - candidate_id: {candidate_id}, usn_for_storage: {usn_for_storage}, candidate_id_val: {candidate_id_val}")
 
         # Generate certificate using SWIZ_CERTI logic
         cert_file_path, certificate_id, copied_path = generate_certificate_pdf(candidate_name)
         app.logger.info(f"Generated certificate {certificate_id} at {cert_file_path}; copied to {copied_path}")
 
-        # Read the generated PDF as base64
+        # Read the generated PDF as bytes
         with open(cert_file_path, 'rb') as f:
-            pdf_data = base64.b64encode(f.read()).decode('utf-8')
+            pdf_bytes = f.read()
+        
+        # Store certificate in database
+        try:
+            conn = get_db()
+            cursor = conn.cursor()
+            
+            # Use USN for storage, fall back to candidate_id if USN is empty
+            lookup_value = usn_for_storage if usn_for_storage else candidate_id_val
+            lookup_column = 'usn' if usn_for_storage else 'candidate_id'
+            
+            if not lookup_value:
+                app.logger.warning(f"Both USN and candidate_id are empty for certificate storage")
+                cursor.close()
+                conn.close()
+                return jsonify({'success': False, 'error': 'Cannot store certificate - no valid identifier'}), 500
+            
+            update_sql = f"""UPDATE Selected SET 
+                certificate_pdf = %s,
+                certificate_id = %s,
+                certificate_generated_date = NOW()
+                WHERE {lookup_column} = %s"""
+            
+            cursor.execute(update_sql, (pdf_bytes, certificate_id, lookup_value))
+            conn.commit()
+            app.logger.info(f"Stored certificate {certificate_id} in database for {lookup_column}={lookup_value}")
+            
+            cursor.close()
+            conn.close()
+            
+            # Send certificate via email
+            if candidate_email:
+                try:
+                    send_certificate_email(candidate_email, candidate_name, pdf_bytes, certificate_id)
+                    app.logger.info(f"✓ Certificate email sent to {candidate_email}")
+                except Exception as email_err:
+                    app.logger.warning(f"Failed to send certificate email to {candidate_email}: {email_err}")
+            else:
+                app.logger.warning(f"No email found for candidate {candidate_id} - certificate not emailed")
+        except Exception as e:
+            app.logger.error(f"Failed to store certificate in database: {e}")
+            import traceback
+            traceback.print_exc()
+            # Don't fail - certificate was still generated and stored on disk
+
+        # Convert to base64 for response
+        pdf_data = base64.b64encode(pdf_bytes).decode('utf-8')
 
         return jsonify({
             'success': True,
@@ -2861,8 +3024,514 @@ def download_certificate(certificate_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/admin/api/download-certificate-db/<usn>', methods=['GET'])
+@login_required
+def download_certificate_db(usn):
+    """Download certificate from database for a candidate"""
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT certificate_pdf, certificate_id
+            FROM Selected
+            WHERE usn = %s AND certificate_pdf IS NOT NULL
+            LIMIT 1
+        """, (usn,))
+        
+        result = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        
+        if not result:
+            return jsonify({'success': False, 'error': 'No stored certificate found'}), 404
+        
+        pdf_bytes = result.get('certificate_pdf')
+        cert_id = result.get('certificate_id', 'certificate')
+        
+        if not pdf_bytes:
+            return jsonify({'success': False, 'error': 'Certificate data is empty'}), 404
+        
+        filename = f"{cert_id}.pdf"
+        return send_file(
+            io.BytesIO(pdf_bytes),
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=filename
+        )
+        
+    except Exception as e:
+        app.logger.error(f"Error downloading certificate from database: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 # ==================== END CERTIFICATE GENERATION ====================
 
+# ==================== OFFER LETTER GENERATION ====================
+
+# ==================== OFFER LETTER HELPERS ====================
+
+def format_date(dt):
+    """Format date with ordinal suffix (e.g., 18th Nov 2025)"""
+    d = dt.day
+    suffix = "th" if 11 <= d <= 13 else {1:"st",2:"nd",3:"rd"}.get(d % 10, "th")
+    return f"{d}{suffix} {dt.strftime('%b')} {dt.year}"
+
+def get_monthwise_serial(month):
+    """Get and increment serial number for the month"""
+    from offer_letter_serial import get_serial
+    return get_serial(month)
+
+def generate_offer_pdf(name, usn, college, email, role, duration, intern_type):
+    """
+    Generate offer letter PDF with given parameters (from database).
+    Returns: BytesIO object with PDF or None on failure
+    """
+    try:
+        from reportlab.pdfgen import canvas
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        from reportlab.pdfbase.pdfmetrics import stringWidth
+        from PyPDF2 import PdfReader, PdfWriter
+        
+        # Constants
+        LEFT = 30
+        RIGHT = 30
+        LINE = 15
+        GAP = 12
+        TOP = 275
+        F_SIZE = 12
+        
+        now = datetime.now()
+        current_month = now.strftime("%b").upper()
+        
+        # Get serial - create if doesn't exist
+        try:
+            serial = get_monthwise_serial(current_month)
+        except:
+            serial = str(int(datetime.now().timestamp()) % 1000).zfill(3)
+        
+        ref_no = f"SZS/OFFR/{now.year}/{current_month}/{serial}"
+        date_str = format_date(now)
+        
+        # Load template
+        template_path = os.path.join('offer-letter-generator', 'offer_template', 'pdf_template.pdf')
+        if not os.path.exists(template_path):
+            raise Exception(f"Template not found at {template_path}")
+        
+        reader = PdfReader(open(template_path, "rb"))
+        writer = PdfWriter()
+        page = reader.pages[0]
+        
+        width = float(page.mediabox.width)
+        height = float(page.mediabox.height)
+        max_width = width - LEFT - RIGHT
+        
+        # Try to load fonts
+        try:
+            pdfmetrics.registerFont(TTFont("TNR", "offer-letter-generator/fonts/Times New Roman.ttf"))
+            pdfmetrics.registerFont(TTFont("TNRB", "offer-letter-generator/fonts/Times New Roman Bold.ttf"))
+            pdfmetrics.registerFont(TTFont("TNRI", "offer-letter-generator/fonts/Times New Roman Italic.ttf"))
+            BODY, BOLD, ITALIC = "TNR", "TNRB", "TNRI"
+        except:
+            BODY, BOLD, ITALIC = "Times-Roman", "Times-Bold", "Times-Italic"
+        
+        buf = io.BytesIO()
+        can = canvas.Canvas(buf, pagesize=(width, height))
+        
+        # ============ HEADER ============
+        y = height - TOP
+        can.setFont(BOLD, F_SIZE)
+        can.drawString(LEFT, y, f"Ref. No.: {ref_no}")
+        can.drawRightString(width - RIGHT, y, f"Date: {date_str}")
+        
+        # ============ TITLE ============
+        y -= 40
+        can.drawCentredString(width / 2, y, "INTERNSHIP OFFER LETTER")
+        
+        # ============ TO BLOCK ============
+        y -= 50
+        can.drawString(LEFT, y, "To,")
+        y -= 20
+        
+        display_name = f"{name} ({usn})" if usn else name
+        can.setFont(BODY, F_SIZE)
+        can.drawString(LEFT, y, display_name); y -= 15
+        can.drawString(LEFT, y, college); y -= 15
+        can.drawString(LEFT, y, email); y -= 8
+        
+        can.setStrokeColorRGB(0.75, 0.75, 0.75)
+        can.setLineWidth(1)
+        can.line(LEFT, y, width - LEFT, y)
+        y -= 25
+        
+        # ============ SUBJECT ============
+        can.setFont(BOLD, F_SIZE)
+        prefix = "Subject: Offer of Internship for the Role of "
+        can.drawString(LEFT, y, prefix)
+        can.drawString(LEFT + stringWidth(prefix, BOLD, F_SIZE), y, role)
+        y -= 30
+        
+        # ============ SALUTATION ============
+        can.setFont(BODY, F_SIZE)
+        can.drawString(LEFT, y, f"Dear {name},")
+        y -= 30
+        
+        # ============ BOLD & ITALIC PATTERNS ============
+        bold_duration_trial = re.compile(rf"{re.escape(duration)}", re.IGNORECASE)
+        bold_hands_on = re.compile(r"hands-on\s+project\s+experience", re.IGNORECASE)
+        bold_swizo = re.compile(re.escape("Swizosoft (OPC) Private Limited"), re.IGNORECASE)
+        bold_team = re.compile(re.escape("Team Swizosoft (OPC) Private Limited"), re.IGNORECASE)
+        bold_industry = re.compile(r"industry-ready\s+skills", re.IGNORECASE)
+        bold_role = re.compile(re.escape(role), re.IGNORECASE)
+        bold_intern_type = re.compile(re.escape(intern_type), re.IGNORECASE)
+        bold_trial = re.compile(r"gain\s+hands-on\s+project", re.IGNORECASE)
+        
+        BOLD_PATTERNS = [
+            bold_duration_trial,
+            bold_hands_on,
+            bold_industry,
+            bold_team,
+            bold_swizo,
+            bold_intern_type,
+            bold_trial,
+            bold_role,
+        ]
+        
+        ITALIC_PHRASE = "real-time project execution"
+        
+        # ============ SEGMENT BUILDER ============
+        def build_segments(words):
+            txt = " ".join(words)
+            segs = []
+            pos = 0
+            L = len(txt)
+            
+            while pos < L:
+                earliest = None
+                
+                # Check for italic
+                idx = txt.lower().find(ITALIC_PHRASE.lower(), pos)
+                if idx != -1:
+                    earliest = (idx, idx+len(ITALIC_PHRASE), ITALIC)
+                
+                # Check for bold patterns
+                for rx in BOLD_PATTERNS:
+                    m = rx.search(txt, pos)
+                    if m:
+                        s,e = m.start(), m.end()
+                        if earliest is None or s < earliest[0]:
+                            earliest = (s,e,BOLD)
+                
+                if not earliest:
+                    rest = txt[pos:].strip()
+                    if rest:
+                        for w in rest.split():
+                            segs.append((w, BODY))
+                    break
+                
+                s,e,font = earliest
+                before = txt[pos:s].strip()
+                if before:
+                    for w in before.split():
+                        segs.append((w,BODY))
+                
+                special = txt[s:e]
+                for w in special.split():
+                    segs.append((w,font))
+                
+                pos = e
+            
+            return segs
+        
+        # ============ JUSTIFIED DRAW ============
+        def draw_justified(segs, yy):
+            if len(segs) == 1:
+                w,f = segs[0]
+                can.setFont(f, F_SIZE)
+                can.drawString(LEFT, yy, w)
+                return
+            
+            total = sum(stringWidth(w,f,F_SIZE) for w,f in segs)
+            rem = max_width - total
+            gaps = len(segs) - 1
+            gap = rem / gaps if gaps > 0 else 0
+            
+            x = LEFT
+            for i,(w,f) in enumerate(segs):
+                can.setFont(f, F_SIZE)
+                can.drawString(x, yy, w)
+                x += stringWidth(w,f,F_SIZE)
+                if i != len(segs)-1:
+                    x += gap
+        
+        # ============ PARAGRAPH ENGINE ============
+        def paragraph(text):
+            nonlocal y
+            text = text.replace("\r","")
+            
+            parts=[]
+            for line in text.split("\n"):
+                words = line.split()
+                if words:
+                    parts.extend(words)
+                parts.append("\n")
+            
+            if parts and parts[-1] == "\n":
+                parts.pop()
+            
+            words = parts
+            curr=[]
+            
+            while words:
+                t = words.pop(0)
+                
+                if t == "\n":
+                    if curr:
+                        seg = build_segments(curr)
+                        draw_justified(seg, y)
+                        y -= LINE
+                        curr=[]
+                    else:
+                        y -= LINE
+                    continue
+                
+                test = curr + [t]
+                test_line = " ".join(test)
+                
+                if stringWidth(test_line, BODY, F_SIZE) <= max_width:
+                    curr = test
+                    if not words:
+                        can.setFont(BODY,F_SIZE)
+                        can.drawString(LEFT,y," ".join(curr))
+                        y -= LINE + GAP
+                        return
+                else:
+                    if curr:
+                        seg = build_segments(curr)
+                        draw_justified(seg, y)
+                        y -= LINE
+                    curr=[t]
+            
+            y -= GAP
+        
+        # ============ PARAGRAPHS ============
+        paragraph("Congratulations!")
+        
+        paragraph(
+            f"We are pleased to offer you the position of {role} at Swizosoft (OPC) Private Limited for a period of {duration}."
+        )
+        
+        paragraph(
+            f"This internship is a {intern_type} designed to help students gain hands-on project\n"
+            " experience and develop industry-ready skills in their respective domains. You will be assigned "
+            "project-based tasks to work on from your own location, under the guidance of our mentors and "
+            "coordinators."
+        )
+        
+        paragraph(
+            "Our goal is to ensure that you learn through real-time project execution rather than classroom "
+            "sessions — allowing you to experience how actual software projects are managed in the IT industry."
+        )
+        
+        paragraph(
+            "We are excited to have you join Team Swizosoft (OPC) Private Limited, and we look forward to your "
+            "active contribution, learning, and growth throughout this journey."
+        )
+        
+        # ============ SIGNATURE ============
+        y -= 10
+        can.setFont(BOLD, F_SIZE)
+        can.drawString(LEFT, y, "Mr. Aditya Madhukar Bhat")
+        y -= 18
+        can.drawString(LEFT, y, "Director, Swizosoft (OPC) Private Limited")
+        
+        # ============ MERGE PDF ============
+        can.save()
+        buf.seek(0)
+        overlay = PdfReader(buf)
+        page.merge_page(overlay.pages[0])
+        
+        writer.add_page(page)
+        for i in range(1, len(reader.pages)):
+            writer.add_page(reader.pages[i])
+        
+        # Return BytesIO with PDF
+        output = io.BytesIO()
+        writer.write(output)
+        output.seek(0)
+        
+        return output, ref_no
+        
+    except Exception as e:
+        app.logger.error(f"Error generating offer PDF: {e}")
+        import traceback
+        traceback.print_exc()
+        return None, None
+
+
+@app.route('/admin/api/generate-offer-letter/<usn>', methods=['GET', 'POST'])
+@login_required
+def admin_generate_offer_letter(usn):
+    """Generate and download offer letter for a selected candidate"""
+    try:
+        # Get candidate from Selected table
+        conn = get_db()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT name, usn, email, college, domain, roles, candidate_id, mode_of_internship
+            FROM Selected
+            WHERE usn = %s
+            LIMIT 1
+        """, (usn,))
+        
+        candidate = cursor.fetchone()
+        
+        if not candidate:
+            cursor.close()
+            conn.close()
+            return jsonify({'success': False, 'error': 'Candidate not found in Selected table'}), 404
+        
+        # Extract data from database
+        name = candidate.get('name', '')
+        email = candidate.get('email', '')
+        college = candidate.get('college', '')
+        domain = candidate.get('domain', '')
+        roles = candidate.get('roles', '')
+        
+        # If roles is empty, construct from domain
+        if not roles and domain:
+            role = f"{domain} Intern"
+        elif roles:
+            role = roles
+        else:
+            role = "Intern"
+        
+        internship_type = candidate.get('mode_of_internship', 'remote-based opportunity')
+        
+        # Generate PDF using the working function
+        output, ref_no = generate_offer_pdf(name, usn, college, email, role, '3 months', internship_type)
+        
+        if not output or not ref_no:
+            cursor.close()
+            conn.close()
+            return jsonify({'success': False, 'error': 'Failed to generate offer letter'}), 500
+        
+        # Get PDF bytes
+        pdf_bytes = output.getvalue()
+        
+        # Store PDF in database
+        try:
+            update_sql = """UPDATE Selected SET 
+                offer_letter_pdf = %s,
+                offer_letter_reference = %s,
+                offer_letter_generated_date = NOW()
+                WHERE usn = %s"""
+            
+            cursor.execute(update_sql, (pdf_bytes, ref_no, usn))
+            conn.commit()
+            app.logger.info(f"Stored offer letter PDF in database for {usn} with ref {ref_no}")
+        except Exception as e:
+            app.logger.error(f"Failed to store PDF in database: {e}")
+            conn.rollback()
+        finally:
+            cursor.close()
+            conn.close()
+        
+        # Return PDF as download
+        filename = f"SZS_OFFR_{ref_no.replace('/', '_')}.pdf"
+        return send_file(
+            output,
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=filename
+        )
+            
+    except Exception as e:
+        app.logger.error(f"Error in generate-offer-letter: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/admin/api/download-offer-letter/<usn>', methods=['GET'])
+@login_required
+def admin_download_offer_letter(usn):
+    """Download offer letter from database"""
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT offer_letter_pdf, offer_letter_reference
+            FROM Selected
+            WHERE usn = %s AND offer_letter_pdf IS NOT NULL
+            LIMIT 1
+        """, (usn,))
+        
+        result = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        
+        if not result:
+            return jsonify({'success': False, 'error': 'No stored offer letter found'}), 404
+        
+        pdf_bytes = result.get('offer_letter_pdf')
+        ref_no = result.get('offer_letter_reference', 'offer_letter')
+        
+        if not pdf_bytes:
+            return jsonify({'success': False, 'error': 'Offer letter data is empty'}), 404
+        
+        filename = f"SZS_OFFR_{ref_no.replace('/', '_')}.pdf"
+        return send_file(
+            io.BytesIO(pdf_bytes),
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=filename
+        )
+        
+    except Exception as e:
+        app.logger.error(f"Error downloading offer letter: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/admin/api/offer-letter-status', methods=['GET'])
+@login_required
+def admin_offer_letter_status():
+    """Get offer letter generation status for all candidates"""
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT usn, name, offer_letter_reference, offer_letter_generated_date,
+                   IF(offer_letter_pdf IS NOT NULL, 'generated', 'pending') as status
+            FROM Selected
+            ORDER BY offer_letter_generated_date DESC
+        """)
+        
+        results = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        
+        offers = []
+        for row in results:
+            offers.append({
+                'usn': row.get('usn'),
+                'name': row.get('name'),
+                'reference': row.get('offer_letter_reference'),
+                'generated_date': row.get('offer_letter_generated_date'),
+                'status': row.get('status')
+            })
+        
+        return jsonify({'success': True, 'offers': offers}), 200
+        
+    except Exception as e:
+        app.logger.error(f"Error getting offer letter status: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# ==================== END OFFER LETTER GENERATION ====================
 
 if __name__ == '__main__':
     # Ensure a secret key exists for session support

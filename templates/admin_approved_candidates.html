@@ -480,6 +480,98 @@
       </div>
     </div>
 
+    <!-- Internship Type Modal -->
+    <div id="internshipTypeModal" class="modal">
+      <div
+        class="modal-content"
+        style="width: 500px; height: auto; max-height: 400px"
+      >
+        <div class="modal-header">
+          <h3>Select Internship Type</h3>
+          <button class="modal-close" onclick="closeInternshipTypeModal()">
+            ✕
+          </button>
+        </div>
+        <div
+          class="modal-body"
+          style="
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            padding: 2rem;
+          "
+        >
+          <p style="margin-bottom: 1rem; color: #333">
+            Please select the internship type:
+          </p>
+
+          <div style="width: 100%; margin-bottom: 1.5rem">
+            <label
+              style="display: block; margin-bottom: 0.5rem; font-weight: 600"
+              >Internship Type:</label
+            >
+            <select
+              id="internshipTypeSelect"
+              style="
+                width: 100%;
+                padding: 0.5rem;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                font-size: 0.95rem;
+              "
+            >
+              <option value="">-- Select Type --</option>
+              <option value="remote-based opportunity">
+                Remote-based opportunity
+              </option>
+              <option value="hybrid-based opportunity">
+                Hybrid-based opportunity
+              </option>
+              <option value="on-site based opportunity">
+                On-site based opportunity
+              </option>
+            </select>
+          </div>
+
+          <div
+            style="
+              display: flex;
+              gap: 1rem;
+              width: 100%;
+              justify-content: flex-end;
+            "
+          >
+            <button
+              onclick="closeInternshipTypeModal()"
+              style="
+                padding: 0.5rem 1rem;
+                background: #6c757d;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                cursor: pointer;
+              "
+            >
+              Cancel
+            </button>
+            <button
+              onclick="confirmInternshipType()"
+              style="
+                padding: 0.5rem 1rem;
+                background: #007bff;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                cursor: pointer;
+              "
+            >
+              Proceed
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Certificate Modal -->
     <div id="certificateModal" class="modal">
       <div
@@ -492,8 +584,26 @@
             ✕
           </button>
         </div>
-        <div class="modal-body" style="display: flex; flex-direction: column; align-items: center; justify-content: center">
-          <div id="certificateContainer" style="width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center">
+        <div
+          class="modal-body"
+          style="
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+          "
+        >
+          <div
+            id="certificateContainer"
+            style="
+              width: 100%;
+              height: 100%;
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              justify-content: center;
+            "
+          >
             <p>Loading certificate...</p>
           </div>
           <div style="margin-top: 1rem; display: flex; gap: 1rem">
@@ -881,18 +991,113 @@
             }
           }
 
-          // Then accept the candidate
-          const r = await fetch(`/accept/${id}`, { method: "POST" });
-          const j = await r.json();
-          if (j.success) {
-            alert("Accept email sent.");
-            loadApprovedCandidates();
-          } else
-            alert(
-              "Accept failed: " + (j.error || j.message || JSON.stringify(j))
-            );
+          // Store candidate ID and proceed to internship type selection
+          window.pendingCandidateId = id;
+          document.getElementById("internshipTypeModal").classList.add("show");
         } catch (e) {
           alert("Error: " + e.message);
+        }
+      }
+
+      function closeInternshipTypeModal() {
+        document.getElementById("internshipTypeModal").classList.remove("show");
+        window.pendingCandidateId = null;
+      }
+
+      async function confirmInternshipType() {
+        const internshipType = document.getElementById(
+          "internshipTypeSelect"
+        ).value;
+        const candidateId = window.pendingCandidateId;
+
+        if (!internshipType) {
+          alert("Please select an internship type");
+          return;
+        }
+
+        if (!candidateId) {
+          alert("Error: Candidate ID not found");
+          return;
+        }
+
+        // Close the modal
+        closeInternshipTypeModal();
+
+        // Accept the candidate with internship type
+        try {
+          const acceptResponse = await fetch(`/accept/${candidateId}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ internship_type: internshipType }),
+          });
+          const acceptResult = await acceptResponse.json();
+          if (acceptResult.success) {
+            alert("Candidate accepted! Downloading offer letter...");
+
+            // Get USN and download offer letter
+            try {
+              const candidateInfo = await fetch(
+                `/admin/api/get-selected-candidate/${candidateId}`
+              ).then((r) => r.json());
+
+              if (candidateInfo.success && candidateInfo.data) {
+                const usn = candidateInfo.data.usn;
+                // Trigger download
+                setTimeout(() => {
+                  const link = document.createElement("a");
+                  link.href = `/admin/api/generate-offer-letter/${usn}`;
+                  link.click();
+                }, 300);
+              }
+            } catch (e) {
+              console.error("Error downloading offer letter:", e);
+            }
+
+            loadApprovedCandidates();
+          } else {
+            alert(
+              "Accept failed: " +
+                (acceptResult.error ||
+                  acceptResult.message ||
+                  JSON.stringify(acceptResult))
+            );
+          }
+        } catch (e) {
+          alert("Error: " + e.message);
+        }
+      }
+
+      function downloadOfferLetter(candidateId) {
+        // Create a form to download the offer letter
+        try {
+          // First, let's try to get the USN from the candidate data
+          // We'll query the API to get the candidate info
+          fetch(`/admin/api/get-selected-candidate/${candidateId}`)
+            .then((r) => r.json())
+            .then((data) => {
+              if (data.success && data.data) {
+                const usn = data.data.usn;
+                if (usn) {
+                  // Create download link
+                  const link = document.createElement("a");
+                  link.href = `/admin/api/generate-offer-letter/${usn}`;
+                  link.download = "";
+                  document.body.appendChild(link);
+                  link.click();
+                  document.body.removeChild(link);
+                  alert("Offer letter downloaded successfully!");
+                }
+              }
+            })
+            .catch((e) => {
+              console.error("Error fetching candidate:", e);
+              alert(
+                "Offer letter was generated. Check the Generated folder in offer-letter-generator."
+              );
+            });
+        } catch (e) {
+          console.error("Error downloading offer letter:", e);
+          alert("Offer letter was generated. Check the Generated folder.");
         }
       }
 
@@ -995,8 +1200,9 @@
         const container = document.getElementById("certificateContainer");
 
         // Update title with certificate ID
-        document.getElementById("certificateTitle").textContent =
-          `Certificate - ${certificateId}`;
+        document.getElementById(
+          "certificateTitle"
+        ).textContent = `Certificate - ${certificateId}`;
 
         // Use iframe to display PDF from base64
         const iframe = document.createElement("iframe");
