@@ -1767,6 +1767,9 @@ def admin_accept(user_id):
                     internship_type = 'paid'
                     duration_str = f"{duration_months} month{'s' if duration_months != 1 else ''}"
                     
+                    print(f"[DEBUG] Generating offer letter for {name_val} ({usn_val})")
+                    print(f"[DEBUG] Params: college={college_val}, email={email_val}, role={role_val}, duration={duration_str}, type={internship_type}")
+                    
                     # Generate offer letter PDF
                     offer_output, offer_ref_no = generate_offer_pdf(
                         name_val, 
@@ -1778,9 +1781,13 @@ def admin_accept(user_id):
                         internship_type
                     )
                     
+                    print(f"[DEBUG] Offer generation result: output={offer_output}, ref_no={offer_ref_no}")
+                    
                     if offer_output and offer_ref_no:
                         # Get PDF bytes
                         pdf_bytes = offer_output.getvalue()
+                        
+                        print(f"[DEBUG] PDF bytes obtained: type={type(pdf_bytes)}, size={len(pdf_bytes)}")
                         
                         # Store offer letter in database
                         update_sql = """UPDATE Selected SET 
@@ -1792,17 +1799,32 @@ def admin_accept(user_id):
                         cursor.execute(update_sql, (pdf_bytes, offer_ref_no, usn_val))
                         conn.commit()
                         app.logger.info(f"✓ Auto-generated and stored offer letter for paid internship {usn_val} with ref {offer_ref_no}")
+                        print(f"✓ Offer letter stored in database for {usn_val}")
                         
                         # Send offer letter via email
                         try:
-                            send_offer_letter_email(email_val, name_val, pdf_bytes, offer_ref_no)
-                            app.logger.info(f"✓ Offer letter email sent to {email_val}")
+                            print(f"[DEBUG] Attempting to send offer letter to {email_val}")
+                            print(f"[DEBUG] PDF bytes type: {type(pdf_bytes)}, size: {len(pdf_bytes) if pdf_bytes else 0}")
+                            result = send_offer_letter_email(email_val, name_val, pdf_bytes, offer_ref_no)
+                            if result:
+                                app.logger.info(f"✓ Offer letter email sent to {email_val}")
+                                print(f"✓ Offer letter email sent to {email_val}")
+                            else:
+                                app.logger.warning(f"Failed to send offer letter email to {email_val} - send function returned False")
+                                print(f"❌ Offer letter email send failed for {email_val}")
                         except Exception as email_err:
-                            app.logger.warning(f"Failed to send offer letter email to {email_val}: {email_err}")
+                            app.logger.exception(f"Error sending offer letter email to {email_val}: {email_err}")
+                            print(f"❌ Exception sending offer letter email: {email_err}")
+                            import traceback
+                            traceback.print_exc()
                     else:
                         app.logger.warning(f"Failed to auto-generate offer letter for paid internship {usn_val}")
+                        print(f"❌ Offer letter generation failed for {usn_val}")
                 except Exception as e:
                     app.logger.warning(f"Error auto-generating offer letter for paid internship {usn_val}: {e}")
+                    print(f"❌ Exception during offer letter process: {e}")
+                    import traceback
+                    traceback.print_exc()
                 
                 # Delete from paid_internship_application and paid_document_store
                 try:
@@ -2966,12 +2988,23 @@ def generate_certificate(candidate_id):
             # Send certificate via email
             if candidate_email:
                 try:
-                    send_certificate_email(candidate_email, candidate_name, pdf_bytes, certificate_id)
-                    app.logger.info(f"✓ Certificate email sent to {candidate_email}")
+                    print(f"[DEBUG] Attempting to send certificate to {candidate_email}")
+                    print(f"[DEBUG] PDF bytes type: {type(pdf_bytes)}, size: {len(pdf_bytes) if pdf_bytes else 0}")
+                    result = send_certificate_email(candidate_email, candidate_name, pdf_bytes, certificate_id)
+                    if result:
+                        app.logger.info(f"✓ Certificate email sent to {candidate_email}")
+                        print(f"✓ Certificate email sent to {candidate_email}")
+                    else:
+                        app.logger.warning(f"Failed to send certificate email to {candidate_email} - send function returned False")
+                        print(f"❌ Certificate email send failed for {candidate_email}")
                 except Exception as email_err:
-                    app.logger.warning(f"Failed to send certificate email to {candidate_email}: {email_err}")
+                    app.logger.exception(f"Error sending certificate email to {candidate_email}: {email_err}")
+                    print(f"❌ Exception sending certificate email: {email_err}")
+                    import traceback
+                    traceback.print_exc()
             else:
                 app.logger.warning(f"No email found for candidate {candidate_id} - certificate not emailed")
+                print(f"❌ No email found for candidate {candidate_id}")
         except Exception as e:
             app.logger.error(f"Failed to store certificate in database: {e}")
             import traceback
@@ -3432,6 +3465,23 @@ def admin_generate_offer_letter(usn):
             cursor.execute(update_sql, (pdf_bytes, ref_no, usn))
             conn.commit()
             app.logger.info(f"Stored offer letter PDF in database for {usn} with ref {ref_no}")
+            
+            # Send offer letter via email
+            try:
+                print(f"[DEBUG] Manually sending offer letter email to {email}")
+                print(f"[DEBUG] PDF bytes type: {type(pdf_bytes)}, size: {len(pdf_bytes) if pdf_bytes else 0}")
+                result = send_offer_letter_email(email, name, pdf_bytes, ref_no)
+                if result:
+                    app.logger.info(f"✓ Offer letter email sent to {email}")
+                    print(f"✓ Offer letter email sent to {email}")
+                else:
+                    app.logger.warning(f"Failed to send offer letter email to {email}")
+                    print(f"❌ Offer letter email send failed for {email}")
+            except Exception as email_err:
+                app.logger.exception(f"Error sending offer letter email: {email_err}")
+                print(f"❌ Exception: {email_err}")
+                import traceback
+                traceback.print_exc()
         except Exception as e:
             app.logger.error(f"Failed to store PDF in database: {e}")
             conn.rollback()

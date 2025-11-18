@@ -231,7 +231,15 @@ def send_offer_letter_email(recipient_email, recipient_name, offer_letter_pdf_by
         offer_letter_reference: Reference number of the offer letter (for filename)
     """
     try:
-        from io import BytesIO
+        # Validate inputs
+        if not recipient_email:
+            print(f"[ERROR] No email provided for offer letter")
+            return False
+        
+        if not offer_letter_pdf_bytes:
+            print(f"[ERROR] No PDF data for offer letter")
+            return False
+        
         sender = current_app.config.get('MAIL_DEFAULT_SENDER')
         
         subject = "Swizosoft — Your Internship Offer Letter"
@@ -269,15 +277,23 @@ Swizosoft Pvt. Ltd."""
         msg.body = body
         msg.html = html
         
-        # Attach the PDF
+        # Attach the PDF - ensure it's bytes
         filename = f"SZS_OFFR_{offer_letter_reference.replace('/', '_')}.pdf"
-        msg.attach(filename, "application/pdf", offer_letter_pdf_bytes)
+        if isinstance(offer_letter_pdf_bytes, bytes):
+            msg.attach(filename, "application/pdf", offer_letter_pdf_bytes)
+        else:
+            print(f"[ERROR] PDF data is not bytes type: {type(offer_letter_pdf_bytes)}")
+            return False
         
         mail.send(msg)
-        current_app.logger.info(f"Offer letter email sent to {recipient_email} with reference {offer_letter_reference}")
+        current_app.logger.info(f"✓ Offer letter email sent to {recipient_email} with reference {offer_letter_reference}")
+        print(f"✓ Offer letter email sent successfully to {recipient_email}")
         return True
     except Exception as e:
-        current_app.logger.exception(f'Failed to send offer letter email to {recipient_email}')
+        current_app.logger.exception(f'Failed to send offer letter email to {recipient_email}: {str(e)}')
+        print(f"[ERROR] Failed to send offer letter email: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return False
 
 
@@ -294,7 +310,15 @@ def send_certificate_email(recipient_email, recipient_name, certificate_pdf_byte
         certificate_id: ID of the certificate (for filename)
     """
     try:
-        from io import BytesIO
+        # Validate inputs
+        if not recipient_email:
+            print(f"[ERROR] No email provided for certificate")
+            return False
+        
+        if not certificate_pdf_bytes:
+            print(f"[ERROR] No PDF data for certificate")
+            return False
+        
         sender = current_app.config.get('MAIL_DEFAULT_SENDER')
         
         subject = "Swizosoft — Your Internship Completion Certificate"
@@ -334,12 +358,20 @@ Swizosoft Pvt. Ltd."""
         
         # Attach the PDF
         filename = f"{certificate_id}.pdf"
-        msg.attach(filename, "application/pdf", certificate_pdf_bytes)
+        if isinstance(certificate_pdf_bytes, bytes):
+            msg.attach(filename, "application/pdf", certificate_pdf_bytes)
+        else:
+            print(f"[ERROR] PDF data is not bytes type: {type(certificate_pdf_bytes)}")
+            return False
         
         mail.send(msg)
-        current_app.logger.info(f"Certificate email sent to {recipient_email} with certificate ID {certificate_id}")
+        current_app.logger.info(f"✓ Certificate email sent to {recipient_email} with certificate ID {certificate_id}")
+        print(f"✓ Certificate email sent successfully to {recipient_email}")
         return True
     except Exception as e:
-        current_app.logger.exception(f'Failed to send certificate email to {recipient_email}')
+        current_app.logger.exception(f'Failed to send certificate email to {recipient_email}: {str(e)}')
+        print(f"[ERROR] Failed to send certificate email: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return False
 
